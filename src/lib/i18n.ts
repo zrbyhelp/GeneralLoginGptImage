@@ -27,7 +27,7 @@ const exactEn: Record<string, string> = {
   '正在退出...': 'Signing out...',
   '列表': 'List',
   '管理设置': 'Admin settings',
-  '搜索提示词、用户、错误...': 'Search prompts, users, errors...',
+  '搜索提示词、用户...': 'Search prompts, users...',
   '搜索提示词、参数...': 'Search prompts and params...',
   '模型': 'Model',
   '全部状态': 'All statuses',

@@ -21,6 +21,8 @@ export interface GenerationAudit {
   userId: string
   userAccount: string | null
   userEmail: string | null
+  userUsername: string | null
+  userName: string | null
   prompt: string
   params: TaskParams
   requestedImageCount: number
@@ -52,6 +54,8 @@ interface AuditRow {
   user_id: string
   user_account: string | null
   user_email: string | null
+  user_username: string | null
+  user_name: string | null
   prompt: string
   params_json: string
   requested_image_count: number
@@ -121,6 +125,8 @@ function rowToAudit(row: AuditRow, outputImages: GenerationAuditImage[]): Genera
     userId: row.user_id,
     userAccount: row.user_account,
     userEmail: row.user_email,
+    userUsername: row.user_username,
+    userName: row.user_name,
     prompt: row.prompt,
     params: parseJson<TaskParams>(row.params_json, {} as TaskParams),
     requestedImageCount: row.requested_image_count,
@@ -149,6 +155,8 @@ function auditSqlParams(audit: GenerationAudit) {
     userId: audit.userId,
     userAccount: audit.userAccount,
     userEmail: audit.userEmail,
+    userUsername: audit.userUsername,
+    userName: audit.userName,
     prompt: audit.prompt,
     paramsJson: JSON.stringify(audit.params),
     requestedImageCount: audit.requestedImageCount,
@@ -230,51 +238,15 @@ function insertAuditImages(images: GenerationAuditImage[]) {
   }
 }
 
-export async function readAudits() {
-  const rows = getDb()
-    .prepare('SELECT * FROM generation_audits ORDER BY created_at DESC')
-    .all() as AuditRow[]
-  const imagesByAuditId = readAllImages()
-  return rows.map((row) => rowToAudit(row, imagesByAuditId.get(row.id) ?? []))
-}
-
-export async function createAudit(input: {
-  user: AppUser
-  prompt: string
-  params: TaskParams
-  requestedImageCount: number
-  inputImageCount: number
-  maskUsed: boolean
-  apiProvider: string
-  apiModel: string
-}) {
-  const now = new Date().toISOString()
-  const audit: GenerationAudit = {
-    id: generateId('gen'),
-    userId: input.user.id,
-    userAccount: input.user.account,
-    userEmail: input.user.email,
-    prompt: input.prompt,
-    params: input.params,
-    requestedImageCount: input.requestedImageCount,
-    inputImageCount: input.inputImageCount,
-    maskUsed: input.maskUsed,
-    apiProvider: input.apiProvider,
-    apiModel: input.apiModel,
-    status: 'running',
-    error: null,
-    outputImages: [],
-    createdAt: now,
-    finishedAt: null,
-    elapsed: null,
-  }
-
+function insertAudit(audit: GenerationAudit) {
   getDb().prepare(`
     INSERT INTO generation_audits (
       id,
       user_id,
       user_account,
       user_email,
+      user_username,
+      user_name,
       prompt,
       params_json,
       requested_image_count,
@@ -295,6 +267,8 @@ export async function createAudit(input: {
       @userId,
       @userAccount,
       @userEmail,
+      @userUsername,
+      @userName,
       @prompt,
       @paramsJson,
       @requestedImageCount,
@@ -312,6 +286,117 @@ export async function createAudit(input: {
       @elapsed
     )
   `).run(auditSqlParams(audit))
+}
+
+function rowsToAudits(rows: AuditRow[]) {
+  const imagesByAuditId = readAllImages()
+  return rows.map((row) => rowToAudit(row, imagesByAuditId.get(row.id) ?? []))
+}
+
+export function createAuditId() {
+  return generateId('gen')
+}
+
+export async function readAudits() {
+  const rows = getDb()
+    .prepare('SELECT * FROM generation_audits ORDER BY created_at DESC')
+    .all() as AuditRow[]
+  return rowsToAudits(rows)
+}
+
+export async function readCompletedAudits() {
+  const rows = getDb()
+    .prepare("SELECT * FROM generation_audits WHERE status = 'done' ORDER BY created_at DESC")
+    .all() as AuditRow[]
+  return rowsToAudits(rows)
+}
+
+export async function createAudit(input: {
+  id?: string
+  user: AppUser
+  prompt: string
+  params: TaskParams
+  requestedImageCount: number
+  inputImageCount: number
+  maskUsed: boolean
+  apiProvider: string
+  apiModel: string
+}) {
+  const now = new Date().toISOString()
+  const audit: GenerationAudit = {
+    id: input.id ?? createAuditId(),
+    userId: input.user.id,
+    userAccount: input.user.account,
+    userEmail: input.user.email,
+    userUsername: input.user.username,
+    userName: input.user.name,
+    prompt: input.prompt,
+    params: input.params,
+    requestedImageCount: input.requestedImageCount,
+    inputImageCount: input.inputImageCount,
+    maskUsed: input.maskUsed,
+    apiProvider: input.apiProvider,
+    apiModel: input.apiModel,
+    status: 'running',
+    error: null,
+    outputImages: [],
+    createdAt: now,
+    finishedAt: null,
+    elapsed: null,
+  }
+
+  insertAudit(audit)
+  return audit
+}
+
+export async function createCompletedAudit(input: {
+  id?: string
+  user: AppUser
+  prompt: string
+  params: TaskParams
+  requestedImageCount: number
+  inputImageCount: number
+  maskUsed: boolean
+  apiProvider: string
+  apiModel: string
+  outputImages: GenerationAuditImage[]
+  actualParams?: Partial<TaskParams>
+  revisedPrompts?: Array<string | undefined>
+  createdAt?: string
+  finishedAt?: string
+  elapsed?: number | null
+}) {
+  const now = new Date().toISOString()
+  const audit: GenerationAudit = {
+    id: input.id ?? createAuditId(),
+    userId: input.user.id,
+    userAccount: input.user.account,
+    userEmail: input.user.email,
+    userUsername: input.user.username,
+    userName: input.user.name,
+    prompt: input.prompt,
+    params: input.params,
+    requestedImageCount: input.requestedImageCount,
+    inputImageCount: input.inputImageCount,
+    maskUsed: input.maskUsed,
+    apiProvider: input.apiProvider,
+    apiModel: input.apiModel,
+    status: 'done',
+    error: null,
+    outputImages: input.outputImages,
+    createdAt: input.createdAt ?? now,
+    finishedAt: input.finishedAt ?? now,
+    elapsed: input.elapsed ?? null,
+  }
+  if (input.actualParams !== undefined) audit.actualParams = input.actualParams
+  if (input.revisedPrompts !== undefined) audit.revisedPrompts = input.revisedPrompts
+
+  const db = getDb()
+  const transaction = db.transaction(() => {
+    insertAudit(audit)
+    insertAuditImages(audit.outputImages)
+  })
+  transaction()
   return audit
 }
 
@@ -328,6 +413,8 @@ export async function updateAudit(id: string, patch: Partial<GenerationAudit>) {
         user_id = @userId,
         user_account = @userAccount,
         user_email = @userEmail,
+        user_username = @userUsername,
+        user_name = @userName,
         prompt = @prompt,
         params_json = @paramsJson,
         requested_image_count = @requestedImageCount,
@@ -383,6 +470,9 @@ export function filterAudits(audits: GenerationAudit[], query: AuditQuery) {
           audit.prompt,
           audit.userAccount,
           audit.userEmail,
+          audit.userName,
+          audit.userUsername,
+          audit.userId,
           audit.apiProvider,
           audit.apiModel,
           audit.error,
@@ -402,7 +492,14 @@ export function filterAudits(audits: GenerationAudit[], query: AuditQuery) {
 export async function countRecentRequestedImages(userId: string, now = Date.now()) {
   const cutoff = new Date(now - 60 * 60 * 1000).toISOString()
   const row = getDb()
-    .prepare('SELECT COALESCE(SUM(requested_image_count), 0) AS total FROM generation_audits WHERE user_id = ? AND created_at >= ?')
+    .prepare(`
+      SELECT COALESCE(COUNT(generation_audit_images.id), 0) AS total
+      FROM generation_audits
+      LEFT JOIN generation_audit_images ON generation_audit_images.audit_id = generation_audits.id
+      WHERE generation_audits.user_id = ?
+        AND generation_audits.status = 'done'
+        AND generation_audits.created_at >= ?
+    `)
     .get(userId, cutoff) as { total?: number | null } | undefined
   return Math.max(0, Number(row?.total ?? 0))
 }

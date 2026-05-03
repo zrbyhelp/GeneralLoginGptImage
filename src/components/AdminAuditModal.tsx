@@ -29,8 +29,11 @@ type AuditImage = {
 
 type AuditItem = {
   id: string
+  userId: string
   userAccount: string | null
   userEmail: string | null
+  userUsername: string | null
+  userName: string | null
   prompt: string
   params: Record<string, unknown>
   requestedImageCount: number
@@ -38,7 +41,7 @@ type AuditItem = {
   maskUsed: boolean
   apiProvider: string
   apiModel: string
-  status: 'running' | 'done' | 'error'
+  status: 'done'
   error: string | null
   auditSaveError?: string | null
   outputImages: AuditImage[]
@@ -66,23 +69,15 @@ function formatDate(value: string | null, locale: 'zh' | 'en') {
   return new Date(value).toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN')
 }
 
-function statusLabel(status: AuditItem['status']) {
-  if (status === 'done') return '完成'
-  if (status === 'running') return '生成中'
-  return '失败'
-}
-
-function statusClass(status: AuditItem['status']) {
-  if (status === 'done') return 'bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-300'
-  if (status === 'running') return 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
-  return 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300'
-}
-
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return '-'
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function auditUserLabel(item: AuditItem) {
+  return item.userAccount || item.userEmail || item.userName || item.userUsername || item.userId
 }
 
 export default function AdminAuditModal() {
@@ -102,7 +97,7 @@ export default function AdminAuditModal() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ item: AuditItem; index: number } | null>(null)
   const [previewZoom, setPreviewZoom] = useState(1)
-  const [filters, setFilters] = useState({ q: '', status: '', model: '' })
+  const [filters, setFilters] = useState({ q: '', model: '' })
 
   useCloseOnEscape(showAdminAudit, () => setShowAdminAudit(false))
   useCloseOnEscape(Boolean(preview), () => setPreview(null))
@@ -127,7 +122,6 @@ export default function AdminAuditModal() {
     params.set('page', String(page))
     params.set('pageSize', String(pageSize))
     if (filters.q.trim()) params.set('q', filters.q.trim())
-    if (filters.status) params.set('status', filters.status)
     if (filters.model.trim()) params.set('model', filters.model.trim())
     return params.toString()
   }, [filters, page, pageSize])
@@ -294,7 +288,7 @@ export default function AdminAuditModal() {
                   setFilters((prev) => ({ ...prev, q: event.target.value }))
                 }}
                 className="min-w-64 flex-1 rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                placeholder="搜索提示词、用户、错误..."
+                placeholder="搜索提示词、用户..."
               />
               <input
                 value={filters.model}
@@ -305,19 +299,6 @@ export default function AdminAuditModal() {
                 className="w-40 rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
                 placeholder="模型"
               />
-              <select
-                value={filters.status}
-                onChange={(event) => {
-                  setPage(1)
-                  setFilters((prev) => ({ ...prev, status: event.target.value }))
-                }}
-                className="rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              >
-                <option value="">全部状态</option>
-                <option value="done">完成</option>
-                <option value="running">生成中</option>
-                <option value="error">失败</option>
-              </select>
               <button className="rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-600 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]" onClick={() => void loadItems()}>
                 刷新
               </button>
@@ -367,9 +348,8 @@ export default function AdminAuditModal() {
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                                  <span className={`rounded-full px-2 py-0.5 ${statusClass(item.status)}`}>{statusLabel(item.status)}</span>
                                   <span>{formatDate(item.createdAt, locale)}</span>
-                                  <span>{item.userAccount || item.userEmail || '未知用户'}</span>
+                                  <span>{auditUserLabel(item)}</span>
                                   <span>{item.apiProvider} / {item.apiModel}</span>
                                   <span>{item.requestedImageCount} 张</span>
                                   {item.outputImages.length > 0 && <span>{item.outputImages.length} 个文件</span>}
@@ -389,6 +369,12 @@ export default function AdminAuditModal() {
                             </div>
                             {expanded && (
                               <div className="mt-4 border-t border-gray-100 pt-4 dark:border-white/[0.08]">
+                                <div className="mb-3">
+                                  <p className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">完整提示词</p>
+                                  <p data-selectable-text data-i18n-skip className="whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700 dark:bg-white/[0.04] dark:text-gray-200">
+                                    {item.prompt}
+                                  </p>
+                                </div>
                                 <pre data-selectable-text className="max-h-52 overflow-auto rounded-xl bg-gray-50 p-3 text-xs leading-5 text-gray-600 dark:bg-white/[0.04] dark:text-gray-300">
                                   {JSON.stringify({ params: item.params, inputImageCount: item.inputImageCount, maskUsed: item.maskUsed }, null, 2)}
                                 </pre>

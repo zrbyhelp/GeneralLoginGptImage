@@ -3,8 +3,8 @@ import type { TaskParams } from '../../../src/types'
 import { requireUser, isAdminUser } from '../../utils/auth'
 import { assertApiConfigUsable, getAdminSettings } from '../../utils/admin-settings'
 import { callServerImageApi } from '../../utils/server-image-api'
-import { countRecentRequestedImages, createAudit, updateAudit } from '../../utils/audits'
-import { saveGeneratedImages } from '../../utils/local-images'
+import { countRecentRequestedImages, createAuditId, createCompletedAudit } from '../../utils/audits'
+import { deleteGeneratedImages, saveGeneratedImages } from '../../utils/local-images'
 
 const DEFAULT_PARAMS: TaskParams = {
   size: 'auto',
@@ -110,16 +110,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const startedAt = Date.now()
-  const audit = await createAudit({
-    user,
-    prompt,
-    params,
-    requestedImageCount: params.n,
-    inputImageCount: inputImageDataUrls.length,
-    maskUsed: Boolean(maskDataUrl),
-    apiProvider: apiConfig.provider,
-    apiModel: apiConfig.model,
-  })
+  const auditId = createAuditId()
 
   try {
     const result = await callServerImageApi({
@@ -131,22 +122,42 @@ export default defineEventHandler(async (event) => {
     })
 
     let auditSaveError: string | null = null
-    let outputImages = []
-    try {
-      outputImages = await saveGeneratedImages(audit.id, result.images)
-    } catch (error) {
-      auditSaveError = error instanceof Error ? error.message : String(error)
+    if (result.images.length > 0) {
+      let outputImages = []
+      try {
+        outputImages = await saveGeneratedImages(auditId, result.images)
+        if (outputImages.length > 0) {
+          try {
+            await createCompletedAudit({
+              id: auditId,
+              user,
+              prompt,
+              params,
+              requestedImageCount: params.n,
+              inputImageCount: inputImageDataUrls.length,
+              maskUsed: Boolean(maskDataUrl),
+              apiProvider: apiConfig.provider,
+              apiModel: apiConfig.model,
+              outputImages,
+              actualParams: result.actualParams,
+              revisedPrompts: result.revisedPrompts,
+              createdAt: new Date(startedAt).toISOString(),
+              finishedAt: new Date().toISOString(),
+              elapsed: Date.now() - startedAt,
+            })
+          } catch (error) {
+            await deleteGeneratedImages(outputImages)
+            auditSaveError = error instanceof Error ? error.message : String(error)
+          }
+        } else {
+          auditSaveError = '接口未返回可保存的图片'
+        }
+      } catch (error) {
+        auditSaveError = error instanceof Error ? error.message : String(error)
+      }
+    } else {
+      auditSaveError = '接口未返回可保存的图片'
     }
-
-    await updateAudit(audit.id, {
-      status: 'done',
-      outputImages,
-      actualParams: result.actualParams,
-      revisedPrompts: result.revisedPrompts,
-      auditSaveError,
-      finishedAt: new Date().toISOString(),
-      elapsed: Date.now() - startedAt,
-    })
 
     return {
       ...result,
@@ -157,12 +168,6 @@ export default defineEventHandler(async (event) => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await updateAudit(audit.id, {
-      status: 'error',
-      error: message,
-      finishedAt: new Date().toISOString(),
-      elapsed: Date.now() - startedAt,
-    })
     throw createError({ statusCode: 502, statusMessage: message })
   }
 })

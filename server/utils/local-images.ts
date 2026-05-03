@@ -34,23 +34,30 @@ export async function saveGeneratedImages(auditId: string, dataUrls: string[]) {
   await mkdir(dir, { recursive: true })
 
   const records: GenerationAuditImage[] = []
-  for (let index = 0; index < dataUrls.length; index += 1) {
-    const { mime, buffer } = dataUrlToBuffer(dataUrls[index])
-    const id = generateId('img')
-    const ext = MIME_EXT[mime] ?? 'bin'
-    const fileName = `${auditId}-${index + 1}-${id}.${ext}`
-    const relativePath = `${partition}/${fileName}`
-    await writeFile(join(root, relativePath), buffer)
-    records.push({
-      id,
-      auditId,
-      fileName,
-      relativePath,
-      mime,
-      size: buffer.byteLength,
-      hash: sha256(buffer),
-      createdAt: new Date().toISOString(),
-    })
+  const writtenRelativePaths: string[] = []
+  try {
+    for (let index = 0; index < dataUrls.length; index += 1) {
+      const { mime, buffer } = dataUrlToBuffer(dataUrls[index])
+      const id = generateId('img')
+      const ext = MIME_EXT[mime] ?? 'bin'
+      const fileName = `${auditId}-${index + 1}-${id}.${ext}`
+      const relativePath = `${partition}/${fileName}`
+      writtenRelativePaths.push(relativePath)
+      await writeFile(join(root, relativePath), buffer)
+      records.push({
+        id,
+        auditId,
+        fileName,
+        relativePath,
+        mime,
+        size: buffer.byteLength,
+        hash: sha256(buffer),
+        createdAt: new Date().toISOString(),
+      })
+    }
+  } catch (error) {
+    await Promise.all(writtenRelativePaths.map((relativePath) => removeFileIfExists(join(root, relativePath))))
+    throw error
   }
 
   return records

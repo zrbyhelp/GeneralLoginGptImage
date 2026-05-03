@@ -79,6 +79,8 @@ function initSchema(db: SqliteDatabase) {
       user_id TEXT NOT NULL,
       user_account TEXT,
       user_email TEXT,
+      user_username TEXT,
+      user_name TEXT,
       prompt TEXT NOT NULL,
       params_json TEXT NOT NULL,
       requested_image_count INTEGER NOT NULL,
@@ -117,6 +119,16 @@ function initSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS generation_audit_images_audit_id_idx
       ON generation_audit_images (audit_id);
   `)
+
+  const auditColumns = new Set(
+    (db.prepare('PRAGMA table_info(generation_audits)').all() as Array<{ name: string }>).map((column) => column.name),
+  )
+  if (!auditColumns.has('user_username')) {
+    db.exec('ALTER TABLE generation_audits ADD COLUMN user_username TEXT')
+  }
+  if (!auditColumns.has('user_name')) {
+    db.exec('ALTER TABLE generation_audits ADD COLUMN user_name TEXT')
+  }
 }
 
 export function getDb() {

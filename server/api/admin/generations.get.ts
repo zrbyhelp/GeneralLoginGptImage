@@ -1,15 +1,14 @@
 import { getQuery } from 'h3'
 import { requireAdmin } from '../../utils/auth'
-import { filterAudits, readAudits } from '../../utils/audits'
+import { filterAudits, readCompletedAudits } from '../../utils/audits'
 
 export default defineEventHandler(async (event) => {
   await requireAdmin(event)
   const query = getQuery(event)
   const page = Math.max(1, Math.floor(Number(query.page || 1)) || 1)
   const pageSize = Math.min(100, Math.max(10, Math.floor(Number(query.pageSize || 20)) || 20))
-  const filtered = filterAudits(await readAudits(), {
+  const filtered = filterAudits(await readCompletedAudits(), {
     q: typeof query.q === 'string' ? query.q : '',
-    status: typeof query.status === 'string' ? query.status : '',
     model: typeof query.model === 'string' ? query.model : '',
     from: typeof query.from === 'string' ? query.from : '',
     to: typeof query.to === 'string' ? query.to : '',
