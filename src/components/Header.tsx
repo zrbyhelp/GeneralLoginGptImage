@@ -5,6 +5,7 @@ import HelpModal from './HelpModal'
 
 export default function Header() {
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const showToast = useStore((s) => s.showToast)
   const auth = useStore((s) => s.auth)
   const setShowAdminAudit = useStore((s) => s.setShowAdminAudit)
   const theme = useStore((s) => s.theme)
@@ -58,6 +59,25 @@ export default function Header() {
     window.location.href = '/api/auth/login'
   }
 
+  async function openFeedback() {
+    const popup = window.open('', 'zr-feedback', 'width=680,height=720')
+    try {
+      const sourceUrl = window.location.href
+      const response = await fetch(`/api/feedback/url?sourceUrl=${encodeURIComponent(sourceUrl)}`, { cache: 'no-store' })
+      if (!response.ok) throw new Error(await response.text())
+      const payload = await response.json() as { url?: string }
+      if (!payload.url) throw new Error('反馈地址无效')
+      if (popup) {
+        popup.location.href = payload.url
+      } else {
+        window.location.href = payload.url
+      }
+    } catch (error) {
+      popup?.close()
+      showToast(`打开投诉建议失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
+  }
+
   return (
     <header data-no-drag-select className="safe-area-top sticky top-0 z-40 border-b border-white/60 bg-white/65 backdrop-blur-xl shadow-sm shadow-slate-900/[0.03] dark:border-white/[0.08] dark:bg-gray-950/65 dark:shadow-black/20">
       <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-end">
@@ -96,6 +116,27 @@ export default function Header() {
               </svg>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => void openFeedback()}
+            className="rounded-lg p-2 transition-colors hover:bg-white/80 dark:hover:bg-white/[0.08]"
+            title="投诉建议"
+            aria-label="投诉建议"
+          >
+            <svg
+              className="h-5 w-5 text-gray-600 dark:text-gray-300"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+            >
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+              <path d="M12 7v5" />
+              <path d="M12 15h.01" />
+            </svg>
+          </button>
           <button
             onClick={() => setShowHelp(true)}
             className="rounded-lg p-2 transition-colors hover:bg-white/80 dark:hover:bg-white/[0.08]"

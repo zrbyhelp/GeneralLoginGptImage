@@ -9,6 +9,7 @@ export default defineNuxtConfig({
   css: ['~/src/index.css'],
   runtimeConfig: {
     portalBaseUrl: 'https://zrg.zrbyhelp.com',
+    feedbackServiceSlug: 'gpt-image-playground',
     serviceClientId: '',
     serviceClientSecret: '',
     adminAccounts: '',
