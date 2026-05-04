@@ -149,7 +149,7 @@ services:
 
 **1. 环境准备与启动**
 
-你可以在项目根目录复制 `.env.example` 为 `.env`，配置统一登录、管理员账号和统一 API。后台管理数据使用 SQLite，默认数据库文件为 `storage/app-data/app.db`，生成图片仍保存到本地文件目录。
+你可以在项目根目录复制 `.env.example` 为 `.env`，配置统一登录、管理员账号和统一 API。后台管理数据使用 SQLite，默认数据库文件为 `storage/app-data/app.db`，生成结果会默认上传到第三方图集服务，隐私模式则不上传。
 
 ```bash
 npm install

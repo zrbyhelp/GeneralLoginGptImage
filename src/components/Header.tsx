@@ -98,7 +98,7 @@ export default function Header() {
             <button
               onClick={() => setShowAdminAudit(true)}
               className="rounded-lg p-2 transition-colors hover:bg-white/80 dark:hover:bg-white/[0.08]"
-              title="生成审计"
+              title="管理设置"
             >
               <svg
                 className="h-5 w-5 text-gray-600 dark:text-gray-300"

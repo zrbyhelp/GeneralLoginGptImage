@@ -15,6 +15,9 @@ export interface ServerApiConfig {
 export interface AdminSettings {
   apiConfig: ServerApiConfig
   hourlyImageLimit: number
+  privacyHourlyImageLimit: number
+  galleryUploadUrl: string
+  galleryUploadToken: string
   updatedAt: string | null
 }
 
@@ -31,6 +34,9 @@ interface AdminSettingsRow {
   api_mode: string
   codex_cli: number
   hourly_image_limit: number
+  privacy_hourly_image_limit: number
+  gallery_upload_url: string
+  gallery_upload_token: string
   updated_at: string | null
 }
 
@@ -68,6 +74,9 @@ export function getDefaultAdminSettings(): AdminSettings {
       codexCli: parseBoolean(config.apiCodexCli),
     },
     hourlyImageLimit: parsePositiveInt(config.defaultHourlyImageLimit, 20, 1, 1000),
+    privacyHourlyImageLimit: parsePositiveInt(config.defaultPrivacyHourlyImageLimit, 5, 1, 1000),
+    galleryUploadUrl: String(config.galleryUploadUrl || 'https://imglist.zrbyhelp.com/api/uploads/third-party').trim(),
+    galleryUploadToken: String(config.galleryUploadToken || ''),
     updatedAt: null,
   }
 }
@@ -89,6 +98,9 @@ function normalizeSettings(input: Partial<AdminSettings> | null | undefined): Ad
       codexCli: provider === 'openai' ? Boolean(api.codexCli ?? defaults.apiConfig.codexCli) : false,
     },
     hourlyImageLimit: parsePositiveInt(input?.hourlyImageLimit, defaults.hourlyImageLimit, 1, 1000),
+    privacyHourlyImageLimit: parsePositiveInt(input?.privacyHourlyImageLimit, defaults.privacyHourlyImageLimit, 1, 1000),
+    galleryUploadUrl: String(input?.galleryUploadUrl ?? defaults.galleryUploadUrl).trim() || defaults.galleryUploadUrl,
+    galleryUploadToken: String(input?.galleryUploadToken ?? defaults.galleryUploadToken),
     updatedAt: typeof input?.updatedAt === 'string' ? input.updatedAt : defaults.updatedAt,
   }
 }
@@ -105,6 +117,9 @@ function rowToSettings(row: AdminSettingsRow): AdminSettings {
       codexCli: Boolean(row.codex_cli),
     },
     hourlyImageLimit: row.hourly_image_limit,
+    privacyHourlyImageLimit: row.privacy_hourly_image_limit,
+    galleryUploadUrl: row.gallery_upload_url,
+    galleryUploadToken: row.gallery_upload_token,
     updatedAt: row.updated_at,
   })
 }
@@ -137,6 +152,9 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       api_mode,
       codex_cli,
       hourly_image_limit,
+      privacy_hourly_image_limit,
+      gallery_upload_url,
+      gallery_upload_token,
       updated_at
     ) VALUES (
       'default',
@@ -148,6 +166,9 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       @apiMode,
       @codexCli,
       @hourlyImageLimit,
+      @privacyHourlyImageLimit,
+      @galleryUploadUrl,
+      @galleryUploadToken,
       @updatedAt
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -159,6 +180,9 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       api_mode = excluded.api_mode,
       codex_cli = excluded.codex_cli,
       hourly_image_limit = excluded.hourly_image_limit,
+      privacy_hourly_image_limit = excluded.privacy_hourly_image_limit,
+      gallery_upload_url = excluded.gallery_upload_url,
+      gallery_upload_token = excluded.gallery_upload_token,
       updated_at = excluded.updated_at
   `).run({
     provider: merged.apiConfig.provider,
@@ -169,6 +193,9 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
     apiMode: merged.apiConfig.apiMode,
     codexCli: merged.apiConfig.codexCli ? 1 : 0,
     hourlyImageLimit: merged.hourlyImageLimit,
+    privacyHourlyImageLimit: merged.privacyHourlyImageLimit,
+    galleryUploadUrl: merged.galleryUploadUrl,
+    galleryUploadToken: merged.galleryUploadToken,
     updatedAt: merged.updatedAt,
   })
 

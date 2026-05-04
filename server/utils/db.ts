@@ -71,8 +71,22 @@ function initSchema(db: SqliteDatabase) {
       api_mode TEXT NOT NULL,
       codex_cli INTEGER NOT NULL,
       hourly_image_limit INTEGER NOT NULL,
+      privacy_hourly_image_limit INTEGER NOT NULL,
+      gallery_upload_url TEXT NOT NULL,
+      gallery_upload_token TEXT NOT NULL,
       updated_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS generation_usage (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      image_count INTEGER NOT NULL,
+      privacy_mode INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS generation_usage_user_privacy_created_at_idx
+      ON generation_usage (user_id, privacy_mode, created_at);
 
     CREATE TABLE IF NOT EXISTS generation_audits (
       id TEXT PRIMARY KEY,
@@ -128,6 +142,19 @@ function initSchema(db: SqliteDatabase) {
   }
   if (!auditColumns.has('user_name')) {
     db.exec('ALTER TABLE generation_audits ADD COLUMN user_name TEXT')
+  }
+
+  const adminSettingColumns = new Set(
+    (db.prepare('PRAGMA table_info(admin_settings)').all() as Array<{ name: string }>).map((column) => column.name),
+  )
+  if (!adminSettingColumns.has('privacy_hourly_image_limit')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN privacy_hourly_image_limit INTEGER NOT NULL DEFAULT 5')
+  }
+  if (!adminSettingColumns.has('gallery_upload_url')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN gallery_upload_url TEXT NOT NULL DEFAULT 'https://imglist.zrbyhelp.com/api/uploads/third-party'")
+  }
+  if (!adminSettingColumns.has('gallery_upload_token')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN gallery_upload_token TEXT NOT NULL DEFAULT ''")
   }
 }
 

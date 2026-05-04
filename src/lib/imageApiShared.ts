@@ -16,6 +16,7 @@ export interface CallApiOptions {
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
   maskDataUrl?: string
+  privacyMode?: boolean
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
 }
 
@@ -34,8 +35,10 @@ export interface CallApiResult {
   apiProfileName?: string
   /** 服务端统一配置实际使用的模型 */
   apiModel?: string
-  /** 生成成功但服务端审计副本保存失败时的提示 */
-  auditSaveError?: string | null
+  /** 生成成功但第三方图集上传失败时的提示 */
+  galleryUploadError?: string | null
+  /** 服务端确认的隐私模式状态 */
+  privacyMode?: boolean
 }
 
 export function isHttpUrl(value: unknown): value is string {

@@ -102,7 +102,7 @@ export default function SettingsModal() {
                 onClick={() =>
                   setConfirmDialog({
                     title: '清空本地数据',
-                    message: '确定要清空当前浏览器里的任务记录和图片数据吗？此操作不会删除服务器审计副本。',
+                    message: '确定要清空当前浏览器里的任务记录和图片数据吗？此操作不会影响图集内容。',
                     action: () => clearAllData(),
                   })
                 }

@@ -3,8 +3,8 @@ import type { TaskParams } from '../../../src/types'
 import { requireUser, isAdminUser } from '../../utils/auth'
 import { assertApiConfigUsable, getAdminSettings } from '../../utils/admin-settings'
 import { callServerImageApi } from '../../utils/server-image-api'
-import { countRecentRequestedImages, createAuditId, createCompletedAudit } from '../../utils/audits'
-import { deleteGeneratedImages, saveGeneratedImages } from '../../utils/local-images'
+import { countRecentGeneratedImages, recordGenerationUsage } from '../../utils/generation-usage'
+import { uploadThirdPartyGalleryContent } from '../../utils/gallery-upload'
 
 const DEFAULT_PARAMS: TaskParams = {
   size: 'auto',
@@ -96,21 +96,20 @@ export default defineEventHandler(async (event) => {
   const apiConfig = settings.apiConfig
   assertApiConfigUsable(apiConfig)
   const params = normalizeParams(body.params, apiConfig.provider)
+  const privacyMode = body.privacyMode === true
 
   if (!isAdminUser(user)) {
-    const used = await countRecentRequestedImages(user.id)
-    const remaining = Math.max(0, settings.hourlyImageLimit - used)
+    const hourlyImageLimit = privacyMode ? settings.privacyHourlyImageLimit : settings.hourlyImageLimit
+    const used = await countRecentGeneratedImages(user.id, privacyMode)
+    const remaining = Math.max(0, hourlyImageLimit - used)
     if (params.n > remaining) {
       throw createError({
         statusCode: 429,
         statusMessage: `已超过每小时生成限制，剩余额度 ${remaining} 张`,
-        data: { remaining, hourlyImageLimit: settings.hourlyImageLimit },
+        data: { remaining, hourlyImageLimit, privacyMode },
       })
     }
   }
-
-  const startedAt = Date.now()
-  const auditId = createAuditId()
 
   try {
     const result = await callServerImageApi({
@@ -121,42 +120,31 @@ export default defineEventHandler(async (event) => {
       maskDataUrl,
     })
 
-    let auditSaveError: string | null = null
     if (result.images.length > 0) {
-      let outputImages = []
+      await recordGenerationUsage({
+        userId: user.id,
+        imageCount: result.images.length,
+        privacyMode,
+      })
+    }
+
+    let galleryUploadError: string | null = null
+    if (!privacyMode && result.images.length > 0) {
       try {
-        outputImages = await saveGeneratedImages(auditId, result.images)
-        if (outputImages.length > 0) {
-          try {
-            await createCompletedAudit({
-              id: auditId,
-              user,
-              prompt,
-              params,
-              requestedImageCount: params.n,
-              inputImageCount: inputImageDataUrls.length,
-              maskUsed: Boolean(maskDataUrl),
-              apiProvider: apiConfig.provider,
-              apiModel: apiConfig.model,
-              outputImages,
-              actualParams: result.actualParams,
-              revisedPrompts: result.revisedPrompts,
-              createdAt: new Date(startedAt).toISOString(),
-              finishedAt: new Date().toISOString(),
-              elapsed: Date.now() - startedAt,
-            })
-          } catch (error) {
-            await deleteGeneratedImages(outputImages)
-            auditSaveError = error instanceof Error ? error.message : String(error)
-          }
-        } else {
-          auditSaveError = '接口未返回可保存的图片'
-        }
+        await uploadThirdPartyGalleryContent({
+          uploadUrl: settings.galleryUploadUrl,
+          uploadToken: settings.galleryUploadToken,
+          prompt,
+          params,
+          provider: apiConfig.provider,
+          model: apiConfig.model,
+          images: result.images,
+          referenceImages: inputImageDataUrls,
+          timeoutSeconds: apiConfig.timeout,
+        })
       } catch (error) {
-        auditSaveError = error instanceof Error ? error.message : String(error)
+        galleryUploadError = error instanceof Error ? error.message : String(error)
       }
-    } else {
-      auditSaveError = '接口未返回可保存的图片'
     }
 
     return {
@@ -164,7 +152,8 @@ export default defineEventHandler(async (event) => {
       apiProvider: apiConfig.provider,
       apiProfileName: '统一配置',
       apiModel: apiConfig.model,
-      auditSaveError,
+      privacyMode,
+      galleryUploadError,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

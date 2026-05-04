@@ -15,6 +15,7 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       params: opts.params,
       inputImageDataUrls: opts.inputImageDataUrls,
       maskDataUrl: opts.maskDataUrl,
+      privacyMode: Boolean(opts.privacyMode),
     }),
   })
 

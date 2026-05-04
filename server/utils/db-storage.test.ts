@@ -21,6 +21,7 @@ import {
   type GenerationAuditImage,
 } from './audits'
 import { setDatabasePathForTests } from './db'
+import { countRecentGeneratedImages, recordGenerationUsage } from './generation-usage'
 
 type TestDatabase = {
   exec: (source: string) => void
@@ -76,6 +77,9 @@ describe('SQLite-backed server storage', () => {
         codexCli: true,
       },
       hourlyImageLimit: 7,
+      privacyHourlyImageLimit: 3,
+      galleryUploadUrl: 'https://imglist.example.com/api/uploads/third-party',
+      galleryUploadToken: 'upload-token',
     })
 
     setDatabasePathForTests(join(tempRoot, 'app.db'))
@@ -86,7 +90,28 @@ describe('SQLite-backed server storage', () => {
     expect(persisted.apiConfig.apiMode).toBe('responses')
     expect(persisted.apiConfig.codexCli).toBe(true)
     expect(persisted.hourlyImageLimit).toBe(7)
+    expect(persisted.privacyHourlyImageLimit).toBe(3)
+    expect(persisted.galleryUploadUrl).toBe('https://imglist.example.com/api/uploads/third-party')
+    expect(persisted.galleryUploadToken).toBe('upload-token')
     expect(readdirSync(tempRoot).filter((fileName) => fileName.endsWith('.json'))).toEqual([])
+  })
+
+  it('tracks generation usage without prompt or image file metadata', async () => {
+    await recordGenerationUsage({ userId: 'user-usage', imageCount: 2, privacyMode: false })
+    await recordGenerationUsage({ userId: 'user-usage', imageCount: 3, privacyMode: true })
+    await recordGenerationUsage({ userId: 'user-other', imageCount: 5, privacyMode: true })
+
+    expect(await countRecentGeneratedImages('user-usage', false)).toBe(2)
+    expect(await countRecentGeneratedImages('user-usage', true)).toBe(3)
+
+    const db = new Database(join(tempRoot, 'app.db')) as unknown as {
+      prepare: (source: string) => { all: () => Array<Record<string, unknown>> }
+      close: () => void
+    }
+    const usageColumns = db.prepare('PRAGMA table_info(generation_usage)').all().map((column) => String(column.name))
+    db.close()
+
+    expect(usageColumns).toEqual(['id', 'user_id', 'image_count', 'privacy_mode', 'created_at'])
   })
 
   it('migrates legacy audit tables to include username and name', async () => {

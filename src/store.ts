@@ -112,6 +112,8 @@ interface AppState {
   // 输入
   prompt: string
   setPrompt: (p: string) => void
+  privacyMode: boolean
+  setPrivacyMode: (privacyMode: boolean) => void
   inputImages: InputImage[]
   addInputImage: (img: InputImage) => void
   removeInputImage: (idx: number) => void
@@ -216,6 +218,8 @@ export const useStore = create<AppState>()(
       // Input
       prompt: '',
       setPrompt: (prompt) => set({ prompt }),
+      privacyMode: false,
+      setPrivacyMode: (privacyMode) => set({ privacyMode }),
       inputImages: [],
       addInputImage: (img) =>
         set((s) => {
@@ -594,7 +598,7 @@ export async function initStore() {
 
 /** 提交新任务 */
 export async function submitTask(options: { allowFullMask?: boolean } = {}) {
-  const { settings, prompt, inputImages, maskDraft, params, showToast, setConfirmDialog } =
+  const { settings, prompt, privacyMode, inputImages, maskDraft, params, showToast, setConfirmDialog } =
     useStore.getState()
 
   if (!prompt.trim()) {
@@ -653,6 +657,7 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
     apiProvider: 'openai',
     apiProfileName: '统一配置',
     apiModel: '服务端模型',
+    privacyMode,
     inputImageIds: orderedInputImages.map((i) => i.id),
     maskTargetImageId,
     maskImageId,
@@ -711,6 +716,7 @@ async function executeTask(taskId: string) {
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
+      privacyMode: Boolean(task.privacyMode),
       onFalRequestEnqueued: (request) => {
         falRequestInfo = request
         updateTaskInStore(taskId, {
@@ -761,8 +767,8 @@ async function executeTask(taskId: string) {
     })
 
     useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
-    if (result.auditSaveError) {
-      useStore.getState().showToast(`服务器审计副本保存失败：${result.auditSaveError}`, 'error')
+    if (result.galleryUploadError) {
+      useStore.getState().showToast(`图集上传失败：${result.galleryUploadError}`, 'error')
     }
     const currentMask = useStore.getState().maskDraft
     if (

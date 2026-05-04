@@ -35,6 +35,8 @@ function useIsMobile() {
 export default function InputBar() {
   const prompt = useStore((s) => s.prompt)
   const setPrompt = useStore((s) => s.setPrompt)
+  const privacyMode = useStore((s) => s.privacyMode)
+  const setPrivacyMode = useStore((s) => s.setPrivacyMode)
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
@@ -553,7 +555,7 @@ export default function InputBar() {
 
     // 计算图片区域和其他固定元素占用的高度
     const imagesHeight = imagesRef.current?.offsetHeight ?? 0
-    const fixedOverhead = imagesHeight + 140
+    const fixedOverhead = imagesHeight + 172
 
     // textarea 最大高度 = 页面 40% 减去固定开销，至少保留 80px
     const maxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
@@ -1223,6 +1225,33 @@ export default function InputBar() {
             placeholder="描述你想生成的图片..."
             className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
           />
+
+          <div className="mt-2 flex items-center justify-between gap-3 px-1">
+            <button
+              type="button"
+              onClick={() => setPrivacyMode(!privacyMode)}
+              className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-gray-500 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+              title="隐私模式"
+              aria-label="隐私模式"
+              aria-pressed={privacyMode}
+            >
+              <svg className={`h-4 w-4 ${privacyMode ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <rect x="3" y="11" width="18" height="10" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <span className={privacyMode ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>隐私模式</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPrivacyMode(!privacyMode)}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${privacyMode ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.16]'}`}
+              title="隐私模式"
+              aria-label="切换隐私模式"
+              aria-pressed={privacyMode}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${privacyMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
 
           {/* 参数 + 按钮 */}
           <div className="mt-3">

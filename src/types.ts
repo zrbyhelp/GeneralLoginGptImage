@@ -85,6 +85,8 @@ export interface TaskRecord {
   falEndpoint?: string
   /** fal.ai 任务连接断开后是否等待自动恢复 */
   falRecoverable?: boolean
+  /** 是否跳过第三方图集上传 */
+  privacyMode?: boolean
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */

@@ -32,6 +32,7 @@ describe('callImageApi', () => {
       params: { ...DEFAULT_PARAMS, n: 2 },
       inputImageDataUrls: ['data:image/png;base64,input'],
       maskDataUrl: 'data:image/png;base64,mask',
+      privacyMode: true,
     })
 
     expect(result).toEqual({
@@ -56,6 +57,7 @@ describe('callImageApi', () => {
       params: { ...DEFAULT_PARAMS, n: 2 },
       inputImageDataUrls: ['data:image/png;base64,input'],
       maskDataUrl: 'data:image/png;base64,mask',
+      privacyMode: true,
     })
   })
 
@@ -94,6 +96,7 @@ describe('callImageApi', () => {
     expect(body).not.toHaveProperty('apiMode')
     expect(body).not.toHaveProperty('codexCli')
     expect(body.params).not.toHaveProperty('apiKey')
+    expect(body.privacyMode).toBe(false)
   })
 
   it('returns server generation metadata unchanged', async () => {
@@ -105,7 +108,7 @@ describe('callImageApi', () => {
       apiProvider: 'fal',
       apiProfileName: '统一配置',
       apiModel: 'openai/gpt-image-2',
-      auditSaveError: null,
+      galleryUploadError: null,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -126,7 +129,7 @@ describe('callImageApi', () => {
       apiProvider: 'fal',
       apiProfileName: '统一配置',
       apiModel: 'openai/gpt-image-2',
-      auditSaveError: null,
+      galleryUploadError: null,
     })
   })
 
