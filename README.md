@@ -151,6 +151,14 @@ services:
 
 你可以在项目根目录复制 `.env.example` 为 `.env`，配置统一登录、管理员账号和统一 API。后台管理数据使用 SQLite，默认数据库文件为 `storage/app-data/app.db`，生成结果会默认上传到第三方图集服务，隐私模式则不上传。
 
+**第三方图集上传：**
+
+- 默认上传地址为 `https://imglist.zrbyhelp.com/api/uploads/third-party`，对应环境变量 `NUXT_GALLERY_UPLOAD_URL`。
+- 图集上传使用 `Authorization: Bearer <upload-token>` 鉴权，Token 只配置在服务端 `NUXT_GALLERY_UPLOAD_TOKEN` 或后台管理设置中，不会暴露给浏览器前端。
+- 非隐私模式下，生成成功后服务端会以 `multipart/form-data` 上传 `prompt`、`images[]`、`referenceImages[]`、`provider`、`model`、`params`。
+- 按最新图集接口文档，上传时会同步当前统一登录用户字段：`userId`、`userAccount`、`userEmail`、`userUsername`、`userName`，便于图集详情展示用户信息。
+- 图集上传失败不会影响本次生成结果，页面只会提示“图集上传失败”；隐私模式会完全跳过图集上传。
+
 ```bash
 npm install
 npm run dev

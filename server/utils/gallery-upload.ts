@@ -2,6 +2,14 @@ import type { TaskParams } from '../../src/types'
 
 const DEFAULT_UPLOAD_URL = 'https://imglist.zrbyhelp.com/api/uploads/third-party'
 
+export interface GalleryUploadUser {
+  id?: string | null
+  account?: string | null
+  email?: string | null
+  username?: string | null
+  name?: string | null
+}
+
 function dataUrlToBlob(dataUrl: string, fallbackType = 'image/png') {
   const match = dataUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/s)
   if (!match) throw new Error('图片数据格式无效')
@@ -38,6 +46,11 @@ async function getUploadErrorMessage(response: Response) {
   return `HTTP ${response.status}`
 }
 
+function appendOptionalFormField(formData: FormData, key: string, value: unknown) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  if (normalized) formData.append(key, normalized)
+}
+
 export async function uploadThirdPartyGalleryContent(input: {
   uploadUrl: string
   uploadToken: string
@@ -47,6 +60,7 @@ export async function uploadThirdPartyGalleryContent(input: {
   provider: string
   model: string
   params: TaskParams
+  user?: GalleryUploadUser | null
   timeoutSeconds: number
 }) {
   const uploadUrl = input.uploadUrl.trim() || DEFAULT_UPLOAD_URL
@@ -59,6 +73,11 @@ export async function uploadThirdPartyGalleryContent(input: {
   formData.append('provider', input.provider)
   formData.append('model', input.model)
   formData.append('params', JSON.stringify(input.params))
+  appendOptionalFormField(formData, 'userId', input.user?.id)
+  appendOptionalFormField(formData, 'userAccount', input.user?.account)
+  appendOptionalFormField(formData, 'userEmail', input.user?.email)
+  appendOptionalFormField(formData, 'userUsername', input.user?.username)
+  appendOptionalFormField(formData, 'userName', input.user?.name)
 
   input.images.forEach((dataUrl, index) => {
     const blob = dataUrlToBlob(dataUrl)

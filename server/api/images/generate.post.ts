@@ -140,6 +140,7 @@ export default defineEventHandler(async (event) => {
           model: apiConfig.model,
           images: result.images,
           referenceImages: inputImageDataUrls,
+          user,
           timeoutSeconds: apiConfig.timeout,
         })
       } catch (error) {
