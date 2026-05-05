@@ -10,6 +10,8 @@ const exactEn: Record<string, string> = {
   '正在验证登录...': 'Verifying login...',
   '正在跳转统一登录...': 'Redirecting to unified login...',
   '提示': 'Notice',
+  '公告': 'Announcement',
+  '关闭公告': 'Dismiss announcement',
   '我知道了': 'Got it',
   '目前服务器资源有限，生成记录和图片资源会优先保存在当前浏览器中。切换账号不会改变本机已有内容；如果需要为不同账号隔离数据，建议使用不同的浏览器用户配置或独立浏览器。':
     'Server resources are currently limited, so generated records and image assets are stored primarily in this browser. Switching accounts will not change existing local content. If you need separate data for different accounts, use separate browser profiles or separate browsers.',

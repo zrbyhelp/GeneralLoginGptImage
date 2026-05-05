@@ -16,6 +16,7 @@ import ImageContextMenu from './components/ImageContextMenu'
 import PortalBackground from './components/PortalBackground'
 import AdminAuditModal from './components/AdminAuditModal'
 import LoginNoticeModal from './components/LoginNoticeModal'
+import AnnouncementBanner, { type ServiceAnnouncement } from './components/AnnouncementBanner'
 
 export default function App() {
   const auth = useStore((s) => s.auth)
@@ -26,7 +27,10 @@ export default function App() {
   const setLocale = useStore((s) => s.setLocale)
   const lastSeenLoginNoticeToken = useStore((s) => s.lastSeenLoginNoticeToken)
   const setLastSeenLoginNoticeToken = useStore((s) => s.setLastSeenLoginNoticeToken)
+  const dismissedAnnouncementIds = useStore((s) => s.dismissedAnnouncementIds)
+  const dismissAnnouncement = useStore((s) => s.dismissAnnouncement)
   const [loginNoticeToken, setLoginNoticeToken] = useState<string | null>(null)
+  const [announcements, setAnnouncements] = useState<ServiceAnnouncement[]>([])
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
@@ -107,6 +111,36 @@ export default function App() {
   }, [auth.authenticated, lastSeenLoginNoticeToken])
 
   useEffect(() => {
+    if (!auth.authenticated) {
+      setAnnouncements([])
+      return
+    }
+
+    const controller = new AbortController()
+    async function loadAnnouncements() {
+      try {
+        const response = await fetch('/api/announcements', {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        if (!response.ok) throw new Error(await response.text())
+        const payload = await response.json() as { announcements?: ServiceAnnouncement[] }
+        if (!controller.signal.aborted) {
+          setAnnouncements(Array.isArray(payload.announcements) ? payload.announcements : [])
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn('Failed to load announcements:', error)
+          setAnnouncements([])
+        }
+      }
+    }
+
+    loadAnnouncements()
+    return () => controller.abort()
+  }, [auth.authenticated, auth.user?.id])
+
+  useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
       if ((e.target as HTMLElement | null)?.closest('img')) {
         e.preventDefault()
@@ -144,6 +178,10 @@ export default function App() {
       <PortalBackground />
       <div className="relative z-10 min-h-screen">
         <Header />
+        <AnnouncementBanner
+          announcements={announcements.filter((announcement) => !dismissedAnnouncementIds.includes(announcement.id))}
+          onDismiss={dismissAnnouncement}
+        />
         <main data-home-main data-drag-select-surface className="pb-48">
           <div className="safe-area-x max-w-7xl mx-auto">
             <SearchBar />

@@ -102,6 +102,8 @@ interface AppState {
   setLocale: (locale: AppLocale) => void
   lastSeenLoginNoticeToken: string
   setLastSeenLoginNoticeToken: (token: string) => void
+  dismissedAnnouncementIds: string[]
+  dismissAnnouncement: (id: string) => void
 
   // 设置
   settings: AppSettings
@@ -188,6 +190,7 @@ export const useStore = create<AppState>()(
           theme: initial.theme,
           locale: initial.locale,
           lastSeenLoginNoticeToken: '',
+          dismissedAnnouncementIds: [],
         }
       })(),
       auth: {
@@ -202,6 +205,11 @@ export const useStore = create<AppState>()(
       setTheme: (theme) => set({ theme }),
       setLocale: (locale) => set({ locale }),
       setLastSeenLoginNoticeToken: (lastSeenLoginNoticeToken) => set({ lastSeenLoginNoticeToken }),
+      dismissAnnouncement: (id) => set((state) => {
+        const normalizedId = id.trim()
+        if (!normalizedId || state.dismissedAnnouncementIds.includes(normalizedId)) return state
+        return { dismissedAnnouncementIds: [...state.dismissedAnnouncementIds, normalizedId] }
+      }),
 
       // Settings
       settings: sanitizeClientSettings(DEFAULT_SETTINGS),
@@ -343,6 +351,7 @@ export const useStore = create<AppState>()(
         theme: state.theme,
         locale: state.locale,
         lastSeenLoginNoticeToken: state.lastSeenLoginNoticeToken,
+        dismissedAnnouncementIds: state.dismissedAnnouncementIds,
       }),
     },
   ),

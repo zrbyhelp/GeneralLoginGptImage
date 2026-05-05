@@ -104,3 +104,17 @@ describe('interrupted OpenAI running tasks', () => {
     expect(result.tasks.find((item) => item.id === 'done-task')).toEqual(doneTask)
   })
 })
+
+describe('announcement dismissal state', () => {
+  beforeEach(() => {
+    useStore.setState({ dismissedAnnouncementIds: [] })
+  })
+
+  it('stores each dismissed announcement id once', () => {
+    useStore.getState().dismissAnnouncement(' announcement-a ')
+    useStore.getState().dismissAnnouncement('announcement-a')
+    useStore.getState().dismissAnnouncement('')
+
+    expect(useStore.getState().dismissedAnnouncementIds).toEqual(['announcement-a'])
+  })
+})
