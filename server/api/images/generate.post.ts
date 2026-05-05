@@ -58,8 +58,7 @@ function normalizeParams(input: unknown, provider: string): TaskParams {
   const moderation = record.moderation === 'low' || record.moderation === 'auto'
     ? record.moderation
     : DEFAULT_PARAMS.moderation
-  const maxImages = provider === 'fal' ? 4 : 10
-  const n = Math.min(maxImages, Math.max(1, Math.floor(Number(record.n || DEFAULT_PARAMS.n)) || 1))
+  const n = Math.min(3, Math.max(1, Math.floor(Number(record.n || DEFAULT_PARAMS.n)) || 1))
   const compression = typeof record.output_compression === 'number' && Number.isFinite(record.output_compression)
     ? Math.max(0, Math.min(100, Math.floor(record.output_compression)))
     : null

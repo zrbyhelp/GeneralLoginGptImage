@@ -405,7 +405,7 @@ async function callFalImageApi(opts: {
     prompt: opts.prompt,
     image_size: imageSize,
     quality: mapFalQuality(opts.params.quality),
-    num_images: Math.min(4, Math.max(1, opts.params.n || 1)),
+    num_images: Math.min(3, Math.max(1, opts.params.n || 1)),
     output_format: opts.params.output_format,
   }
   if (isEdit) input.image_urls = opts.inputImageDataUrls

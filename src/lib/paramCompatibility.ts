@@ -3,8 +3,9 @@ import { getActiveApiProfile } from './apiProfiles'
 import { normalizeImageSize } from './size'
 
 export const DEFAULT_FAL_IMAGE_SIZE = '1360x1024'
-export const MAX_FAL_OUTPUT_IMAGES = 4
-export const MAX_OPENAI_OUTPUT_IMAGES = 10
+export const MAX_OUTPUT_IMAGES = 3
+export const MAX_FAL_OUTPUT_IMAGES = MAX_OUTPUT_IMAGES
+export const MAX_OPENAI_OUTPUT_IMAGES = MAX_OUTPUT_IMAGES
 
 export function getOutputImageLimitForSettings(settings: AppSettings) {
   return getActiveApiProfile(settings).provider === 'fal' ? MAX_FAL_OUTPUT_IMAGES : MAX_OPENAI_OUTPUT_IMAGES

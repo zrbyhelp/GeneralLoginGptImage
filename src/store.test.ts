@@ -1,8 +1,28 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/apiProfiles'
 import type { TaskRecord } from './types'
 import { editOutputs, markInterruptedOpenAIRunningTasks, submitTask, useStore } from './store'
+
+const dbMocks = vi.hoisted(() => ({
+  getAllTasks: vi.fn(),
+  putTask: vi.fn(),
+  deleteTask: vi.fn(),
+  clearTasks: vi.fn(),
+  getImage: vi.fn(),
+  getAllImages: vi.fn(),
+  putImage: vi.fn(),
+  deleteImage: vi.fn(),
+  clearImages: vi.fn(),
+  storeImage: vi.fn(),
+}))
+
+const apiMocks = vi.hoisted(() => ({
+  callImageApi: vi.fn(),
+}))
+
+vi.mock('./lib/db', () => dbMocks)
+vi.mock('./lib/api', () => apiMocks)
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 
@@ -26,6 +46,12 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
 
 describe('mask draft lifecycle in store actions', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+    dbMocks.putTask.mockResolvedValue('task-key')
+    dbMocks.storeImage.mockResolvedValue('stored-image')
+    dbMocks.getImage.mockResolvedValue(undefined)
+    apiMocks.callImageApi.mockResolvedValue({ images: [] })
     useStore.setState({
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
       prompt: 'prompt',
@@ -43,6 +69,10 @@ describe('mask draft lifecycle in store actions', () => {
       showToast: vi.fn(),
       setConfirmDialog: vi.fn(),
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('preserves an existing mask when quick edit-output adds outputs as references', async () => {
@@ -71,9 +101,82 @@ describe('mask draft lifecycle in store actions', () => {
       },
     })
 
-    await submitTask()
+    await submitTask({ confirmed: true })
 
     expect(useStore.getState().maskDraft).toBeNull()
+  })
+})
+
+describe('submit task safeguards', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+    dbMocks.putTask.mockResolvedValue('task-key')
+    dbMocks.storeImage.mockResolvedValue('stored-image')
+    dbMocks.getImage.mockResolvedValue(undefined)
+    apiMocks.callImageApi.mockResolvedValue({ images: [] })
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      prompt: 'prompt',
+      inputImages: [],
+      maskDraft: null,
+      maskEditorImageId: null,
+      params: { ...DEFAULT_PARAMS },
+      tasks: [],
+      detailTaskId: null,
+      lightboxImageId: null,
+      lightboxImageList: [],
+      showSettings: false,
+      toast: null,
+      confirmDialog: null,
+      showToast: vi.fn(),
+      setConfirmDialog: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('opens a confirmation before creating a generation task', async () => {
+    await submitTask()
+
+    expect(dbMocks.putTask).not.toHaveBeenCalled()
+    expect(useStore.getState().setConfirmDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '确认生成图片？',
+      confirmText: '确认生成',
+    }))
+  })
+
+  it('creates a task only after the confirmation action runs', async () => {
+    await submitTask()
+
+    const setConfirmDialog = vi.mocked(useStore.getState().setConfirmDialog)
+    const dialog = setConfirmDialog.mock.calls[0][0]
+    dialog?.action()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'prompt',
+      status: 'running',
+    }))
+    expect(useStore.getState().prompt).toBe('')
+  })
+
+  it('blocks submission while another image is generating', async () => {
+    useStore.setState({
+      tasks: [task({ id: 'running-task', status: 'running', finishedAt: null, elapsed: null })],
+    })
+
+    await submitTask()
+
+    expect(dbMocks.putTask).not.toHaveBeenCalled()
+    expect(useStore.getState().setConfirmDialog).not.toHaveBeenCalled()
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(
+      '请等待当前图片生成完成后再继续生成',
+      'info',
+    )
   })
 })
 

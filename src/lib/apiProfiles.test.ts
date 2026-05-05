@@ -6,7 +6,16 @@ import {
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_SETTINGS,
   mergeImportedSettings,
+  normalizeSettings,
 } from './apiProfiles'
+
+describe('default settings', () => {
+  it('clears input after submit by default', () => {
+    expect(DEFAULT_SETTINGS.clearInputAfterSubmit).toBe(true)
+    expect(normalizeSettings({}).clearInputAfterSubmit).toBe(true)
+    expect(normalizeSettings({ clearInputAfterSubmit: false }).clearInputAfterSubmit).toBe(false)
+  })
+})
 
 describe('mergeImportedSettings', () => {
   it('replaces the default OpenAI profile with legacy imported settings when current settings are untouched', () => {

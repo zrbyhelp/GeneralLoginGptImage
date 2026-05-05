@@ -39,6 +39,12 @@ const FAL_RECOVERY_POLL_MS = 10_000
 const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const OPENAI_INTERRUPTED_ERROR = '请求中断'
+const WAIT_FOR_RUNNING_TASK_MESSAGE = '请等待当前图片生成完成后再继续生成'
+
+type SubmitTaskOptions = {
+  allowFullMask?: boolean
+  confirmed?: boolean
+}
 
 function createOpenAITimeoutError(timeoutSeconds: number) {
   return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。`
@@ -606,12 +612,30 @@ export async function initStore() {
 }
 
 /** 提交新任务 */
-export async function submitTask(options: { allowFullMask?: boolean } = {}) {
+export async function submitTask(options: SubmitTaskOptions = {}) {
   const { settings, prompt, privacyMode, inputImages, maskDraft, params, showToast, setConfirmDialog } =
     useStore.getState()
 
   if (!prompt.trim()) {
     showToast('请输入提示词', 'error')
+    return
+  }
+
+  if (useStore.getState().tasks.some((task) => task.status === 'running')) {
+    showToast(WAIT_FOR_RUNNING_TASK_MESSAGE, 'info')
+    return
+  }
+
+  if (!options.confirmed) {
+    setConfirmDialog({
+      title: '确认生成图片？',
+      message: '将提交当前提示词和参数生成图片。是否继续？',
+      confirmText: '确认生成',
+      icon: 'info',
+      action: () => {
+        void submitTask({ ...options, confirmed: true })
+      },
+    })
     return
   }
 
@@ -630,7 +654,7 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
           confirmText: '继续提交',
           tone: 'warning',
           action: () => {
-            void submitTask({ allowFullMask: true })
+            void submitTask({ ...options, allowFullMask: true, confirmed: true })
           },
         })
         return
@@ -835,8 +859,25 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
 }
 
 /** 重试失败的任务：创建新任务并执行 */
-export async function retryTask(task: TaskRecord) {
-  const { settings } = useStore.getState()
+export async function retryTask(task: TaskRecord, options: { confirmed?: boolean } = {}) {
+  const { settings, showToast, setConfirmDialog } = useStore.getState()
+  if (useStore.getState().tasks.some((item) => item.status === 'running')) {
+    showToast(WAIT_FOR_RUNNING_TASK_MESSAGE, 'info')
+    return
+  }
+  if (!options.confirmed) {
+    setConfirmDialog({
+      title: '确认重试生成？',
+      message: '将使用这条记录的提示词和参数重新生成图片。是否继续？',
+      confirmText: '确认重试',
+      icon: 'info',
+      action: () => {
+        void retryTask(task, { confirmed: true })
+      },
+    })
+    return
+  }
+
   const activeProfile = getActiveApiProfile(settings)
   const normalizedParams = normalizeParamsForSettings(task.params, settings)
   const taskId = genId()
