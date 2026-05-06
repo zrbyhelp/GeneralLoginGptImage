@@ -115,6 +115,34 @@ function mergeActualParams(...sources: Array<Partial<TaskParams> | undefined>) {
   return Object.keys(merged).length ? merged as Partial<TaskParams> : undefined
 }
 
+function mergeConcurrentResults(results: PromiseSettledResult<ServerImageApiResult>[]) {
+  const successful = results
+    .filter((result): result is PromiseFulfilledResult<ServerImageApiResult> => result.status === 'fulfilled')
+    .map((result) => result.value)
+  const errors = results
+    .map((result, index) => {
+      if (result.status === 'fulfilled') return null
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason)
+      return `第 ${index + 1} 张生成失败：${message}`
+    })
+    .filter((message): message is string => Boolean(message))
+
+  if (!successful.length) {
+    const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (firstError) throw firstError.reason
+    throw new Error('所有并发请求均失败')
+  }
+
+  const images = successful.flatMap((result) => result.images)
+  return {
+    images,
+    actualParams: mergeActualParams(successful[0].actualParams, { n: images.length }),
+    actualParamsList: successful.flatMap((result) => result.actualParamsList ?? result.images.map(() => result.actualParams)),
+    revisedPrompts: successful.flatMap((result) => result.revisedPrompts ?? result.images.map(() => undefined)),
+    partialError: errors.length ? errors.join('\n') : null,
+  }
+}
+
 function createRequestHeaders(config: ServerApiConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${config.apiKey}`,
@@ -196,33 +224,10 @@ async function callImagesApi(opts: {
   const n = Math.max(1, opts.params.n || 1)
   if (n > 1) {
     const single = { ...opts, params: { ...opts.params, n: 1 } }
-    const successful: ServerImageApiResult[] = []
-    const errors: string[] = []
-    let firstError: unknown = null
-
-    for (let index = 0; index < n; index += 1) {
-      try {
-        successful.push(await callImagesApi(single))
-      } catch (error) {
-        if (firstError == null) firstError = error
-        const message = error instanceof Error ? error.message : String(error)
-        errors.push(`第 ${index + 1} 张生成失败：${message}`)
-      }
-    }
-
-    if (!successful.length) {
-      if (firstError) throw firstError
-      throw new Error('所有串行请求均失败')
-    }
-
-    const images = successful.flatMap((result) => result.images)
-    return {
-      images,
-      actualParams: mergeActualParams(successful[0].actualParams, { n: images.length }),
-      actualParamsList: successful.flatMap((result) => result.actualParamsList ?? result.images.map(() => result.actualParams)),
-      revisedPrompts: successful.flatMap((result) => result.revisedPrompts ?? result.images.map(() => undefined)),
-      partialError: errors.length ? errors.join('\n') : null,
-    }
+    const results = await Promise.allSettled(
+      Array.from({ length: n }, () => callImagesApi(single)),
+    )
+    return mergeConcurrentResults(results)
   }
 
   const prompt = opts.config.codexCli
@@ -329,33 +334,10 @@ async function callResponsesImageApi(opts: {
   const n = Math.max(1, opts.params.n || 1)
   if (n > 1) {
     const single = { ...opts, params: { ...opts.params, n: 1 } }
-    const successful: ServerImageApiResult[] = []
-    const errors: string[] = []
-    let firstError: unknown = null
-
-    for (let index = 0; index < n; index += 1) {
-      try {
-        successful.push(await callResponsesImageApi(single))
-      } catch (error) {
-        if (firstError == null) firstError = error
-        const message = error instanceof Error ? error.message : String(error)
-        errors.push(`第 ${index + 1} 张生成失败：${message}`)
-      }
-    }
-
-    if (!successful.length) {
-      if (firstError) throw firstError
-      throw new Error('所有串行请求均失败')
-    }
-
-    const images = successful.flatMap((result) => result.images)
-    return {
-      images,
-      actualParams: mergeActualParams(successful[0].actualParams, { n: images.length }),
-      actualParamsList: successful.flatMap((result) => result.actualParamsList ?? result.images.map(() => result.actualParams)),
-      revisedPrompts: successful.flatMap((result) => result.revisedPrompts ?? result.images.map(() => undefined)),
-      partialError: errors.length ? errors.join('\n') : null,
-    }
+    const results = await Promise.allSettled(
+      Array.from({ length: n }, () => callResponsesImageApi(single)),
+    )
+    return mergeConcurrentResults(results)
   }
 
   const mime = MIME_MAP[opts.params.output_format] || 'image/png'

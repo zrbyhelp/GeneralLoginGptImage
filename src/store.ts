@@ -38,7 +38,6 @@ const imageCache = new Map<string, string>()
 const FAL_RECOVERY_POLL_MS = 10_000
 const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const OPENAI_INTERRUPTED_ERROR = '请求中断'
-const WAIT_FOR_RUNNING_TASK_MESSAGE = '请等待当前图片生成完成后再继续生成'
 
 type SubmitTaskOptions = {
   allowFullMask?: boolean
@@ -582,11 +581,6 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     return
   }
 
-  if (useStore.getState().tasks.some((task) => task.status === 'running')) {
-    showToast(WAIT_FOR_RUNNING_TASK_MESSAGE, 'info')
-    return
-  }
-
   if (!options.confirmed) {
     setConfirmDialog({
       title: '确认生成图片？',
@@ -819,11 +813,7 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
 
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord, options: { confirmed?: boolean } = {}) {
-  const { settings, showToast, setConfirmDialog } = useStore.getState()
-  if (useStore.getState().tasks.some((item) => item.status === 'running')) {
-    showToast(WAIT_FOR_RUNNING_TASK_MESSAGE, 'info')
-    return
-  }
+  const { settings, setConfirmDialog } = useStore.getState()
   if (!options.confirmed) {
     setConfirmDialog({
       title: '确认重试生成？',

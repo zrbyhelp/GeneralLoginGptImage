@@ -61,16 +61,16 @@ describe('server image API Responses mode', () => {
     vi.restoreAllMocks()
   })
 
-  it('generates multiple images serially and keeps successes after a failure', async () => {
+  it('generates multiple images concurrently and keeps successes after a failure', async () => {
     let activeRequests = 0
     let maxActiveRequests = 0
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const callIndex = fetchMock.mock.calls.length
       activeRequests += 1
       maxActiveRequests = Math.max(maxActiveRequests, activeRequests)
       await Promise.resolve()
       activeRequests -= 1
 
-      const callIndex = fetchMock.mock.calls.length
       if (callIndex === 2) return new Response('gateway timeout', { status: 504 })
       return responsesImage(callIndex === 1 ? 'image-a' : 'image-c')
     })
@@ -83,7 +83,7 @@ describe('server image API Responses mode', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(maxActiveRequests).toBe(1)
+    expect(maxActiveRequests).toBe(3)
     expect(result.images).toEqual([
       'data:image/png;base64,image-a',
       'data:image/png;base64,image-c',
@@ -93,7 +93,7 @@ describe('server image API Responses mode', () => {
     expect(result.partialError).toContain('第 2 张生成失败：gateway timeout')
   })
 
-  it('tries every requested image before failing when all serial attempts fail', async () => {
+  it('tries every requested image before failing when all concurrent attempts fail', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response('first failure', { status: 500 }))
       .mockResolvedValueOnce(new Response('second failure', { status: 502 }))
@@ -115,16 +115,16 @@ describe('server image API Images mode', () => {
     vi.restoreAllMocks()
   })
 
-  it('generates multiple images serially and keeps successes after a failure', async () => {
+  it('generates multiple images concurrently and keeps successes after a failure', async () => {
     let activeRequests = 0
     let maxActiveRequests = 0
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const callIndex = fetchMock.mock.calls.length
       activeRequests += 1
       maxActiveRequests = Math.max(maxActiveRequests, activeRequests)
       await Promise.resolve()
       activeRequests -= 1
 
-      const callIndex = fetchMock.mock.calls.length
       if (callIndex === 2) return new Response('gateway timeout', { status: 504 })
       return imagesImage(callIndex === 1 ? 'image-a' : 'image-c')
     })
@@ -137,7 +137,7 @@ describe('server image API Images mode', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(maxActiveRequests).toBe(1)
+    expect(maxActiveRequests).toBe(3)
     expect(result.images).toEqual([
       'data:image/png;base64,image-a',
       'data:image/png;base64,image-c',
@@ -152,7 +152,7 @@ describe('server image API Images mode', () => {
     }
   })
 
-  it('tries every requested image before failing when all serial attempts fail', async () => {
+  it('tries every requested image before failing when all concurrent attempts fail', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response('first failure', { status: 500 }))
       .mockResolvedValueOnce(new Response('second failure', { status: 502 }))

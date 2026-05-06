@@ -222,19 +222,20 @@ describe('submit task safeguards', () => {
     await flushPromises()
   })
 
-  it('blocks submission while another image is generating', async () => {
+  it('allows submission while another image is generating', async () => {
+    const runningTask = task({ id: 'running-task', status: 'running', finishedAt: null, elapsed: null })
     useStore.setState({
-      tasks: [task({ id: 'running-task', status: 'running', finishedAt: null, elapsed: null })],
+      tasks: [runningTask],
     })
 
-    await submitTask()
+    await submitTask({ confirmed: true })
 
-    expect(dbMocks.putTask).not.toHaveBeenCalled()
-    expect(useStore.getState().setConfirmDialog).not.toHaveBeenCalled()
-    expect(useStore.getState().showToast).toHaveBeenCalledWith(
-      '请等待当前图片生成完成后再继续生成',
-      'info',
-    )
+    expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'prompt',
+      status: 'running',
+    }))
+    expect(useStore.getState().tasks).toHaveLength(2)
+    expect(useStore.getState().tasks[1]).toEqual(runningTask)
   })
 })
 
