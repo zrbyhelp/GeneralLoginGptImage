@@ -193,6 +193,38 @@ async function callImagesApi(opts: {
   inputImageDataUrls: string[]
   maskDataUrl?: string
 }) {
+  const n = Math.max(1, opts.params.n || 1)
+  if (n > 1) {
+    const single = { ...opts, params: { ...opts.params, n: 1 } }
+    const successful: ServerImageApiResult[] = []
+    const errors: string[] = []
+    let firstError: unknown = null
+
+    for (let index = 0; index < n; index += 1) {
+      try {
+        successful.push(await callImagesApi(single))
+      } catch (error) {
+        if (firstError == null) firstError = error
+        const message = error instanceof Error ? error.message : String(error)
+        errors.push(`第 ${index + 1} 张生成失败：${message}`)
+      }
+    }
+
+    if (!successful.length) {
+      if (firstError) throw firstError
+      throw new Error('所有串行请求均失败')
+    }
+
+    const images = successful.flatMap((result) => result.images)
+    return {
+      images,
+      actualParams: mergeActualParams(successful[0].actualParams, { n: images.length }),
+      actualParamsList: successful.flatMap((result) => result.actualParamsList ?? result.images.map(() => result.actualParams)),
+      revisedPrompts: successful.flatMap((result) => result.revisedPrompts ?? result.images.map(() => undefined)),
+      partialError: errors.length ? errors.join('\n') : null,
+    }
+  }
+
   const prompt = opts.config.codexCli
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${opts.prompt}`
     : opts.prompt

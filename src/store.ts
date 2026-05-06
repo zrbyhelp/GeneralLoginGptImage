@@ -727,7 +727,7 @@ async function executeTask(taskId: string) {
     : null
 
   if (taskProvider === 'openai') {
-    scheduleOpenAIWatchdog(taskId, activeProfile.timeout)
+    scheduleOpenAIWatchdog(taskId, activeProfile.timeout * Math.max(1, task.params.n || 1))
   }
 
   try {
