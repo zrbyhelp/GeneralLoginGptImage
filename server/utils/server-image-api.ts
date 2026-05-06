@@ -12,6 +12,7 @@ export interface ServerImageApiResult {
   actualParams?: Partial<TaskParams>
   actualParamsList?: Array<Partial<TaskParams> | undefined>
   revisedPrompts?: Array<string | undefined>
+  partialError?: string | null
 }
 
 const MIME_MAP: Record<string, string> = {
@@ -74,19 +75,24 @@ async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, signal?
 
 async function getApiErrorMessage(response: Response) {
   let message = `HTTP ${response.status}`
+  let text = ''
   try {
-    const body = await response.json()
+    text = await response.text()
+  } catch {
+    return message
+  }
+
+  if (!text) return message
+
+  try {
+    const body = JSON.parse(text)
     if (body?.error?.message) message = body.error.message
     else if (typeof body?.detail === 'string') message = body.detail
     else if (Array.isArray(body?.detail)) message = body.detail.map((item: unknown) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n')
     else if (typeof body?.error === 'string') message = body.error
     else if (typeof body?.message === 'string') message = body.message
   } catch {
-    try {
-      message = await response.text()
-    } catch {
-      /* ignore */
-    }
+    message = text
   }
   return message
 }
@@ -291,21 +297,32 @@ async function callResponsesImageApi(opts: {
   const n = Math.max(1, opts.params.n || 1)
   if (n > 1) {
     const single = { ...opts, params: { ...opts.params, n: 1 } }
-    const results = await Promise.allSettled(Array.from({ length: n }).map(() => callResponsesImageApi(single)))
-    const successful = results
-      .filter((result): result is PromiseFulfilledResult<ServerImageApiResult> => result.status === 'fulfilled')
-      .map((result) => result.value)
-    if (!successful.length) {
-      const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (firstError) throw firstError.reason
-      throw new Error('所有并发请求均失败')
+    const successful: ServerImageApiResult[] = []
+    const errors: string[] = []
+    let firstError: unknown = null
+
+    for (let index = 0; index < n; index += 1) {
+      try {
+        successful.push(await callResponsesImageApi(single))
+      } catch (error) {
+        if (firstError == null) firstError = error
+        const message = error instanceof Error ? error.message : String(error)
+        errors.push(`第 ${index + 1} 张生成失败：${message}`)
+      }
     }
+
+    if (!successful.length) {
+      if (firstError) throw firstError
+      throw new Error('所有串行请求均失败')
+    }
+
     const images = successful.flatMap((result) => result.images)
     return {
       images,
       actualParams: mergeActualParams(successful[0].actualParams, { n: images.length }),
       actualParamsList: successful.flatMap((result) => result.actualParamsList ?? result.images.map(() => result.actualParams)),
       revisedPrompts: successful.flatMap((result) => result.revisedPrompts ?? result.images.map(() => undefined)),
+      partialError: errors.length ? errors.join('\n') : null,
     }
   }
 

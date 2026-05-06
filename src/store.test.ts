@@ -26,6 +26,12 @@ vi.mock('./lib/api', () => apiMocks)
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 
+async function flushPromises(times = 8) {
+  for (let i = 0; i < times; i += 1) {
+    await Promise.resolve()
+  }
+}
+
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: 'task-a',
@@ -162,6 +168,26 @@ describe('submit task safeguards', () => {
       status: 'running',
     }))
     expect(useStore.getState().prompt).toBe('')
+  })
+
+  it('keeps successful output images and partial errors on a partially failed generation', async () => {
+    apiMocks.callImageApi.mockResolvedValue({
+      images: ['data:image/png;base64,output'],
+      partialError: '第 2 张生成失败：HTTP 504',
+    })
+
+    await submitTask({ confirmed: true })
+    await flushPromises()
+
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      status: 'done',
+      outputImages: ['stored-image'],
+      partialError: '第 2 张生成失败：HTTP 504',
+    })
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(
+      '部分图片生成失败，已保留成功结果',
+      'error',
+    )
   })
 
   it('blocks submission while another image is generating', async () => {

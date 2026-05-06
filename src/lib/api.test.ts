@@ -109,6 +109,7 @@ describe('callImageApi', () => {
       apiProfileName: '统一配置',
       apiModel: 'openai/gpt-image-2',
       galleryUploadError: null,
+      partialError: '第 2 张生成失败：HTTP 504',
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -130,6 +131,7 @@ describe('callImageApi', () => {
       apiProfileName: '统一配置',
       apiModel: 'openai/gpt-image-2',
       galleryUploadError: null,
+      partialError: '第 2 张生成失败：HTTP 504',
     })
   })
 

@@ -171,6 +171,7 @@ export default function DetailModal() {
   const taskModel = task.apiModel || '未知'
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
   const isFalReconnecting = task.status === 'error' && task.falRecoverable
+  const partialError = task.partialError?.trim() || ''
 
   const formatTime = (ts: number | null) => {
     if (!ts) return ''
@@ -228,6 +229,16 @@ export default function DetailModal() {
       showToast('完整报错已复制', 'success')
     } catch (err) {
       showToast(getClipboardFailureMessage('复制报错失败', err), 'error')
+    }
+  }
+
+  const handleCopyPartialError = async () => {
+    if (!partialError) return
+    try {
+      await copyTextToClipboard(partialError)
+      showToast('部分失败原因已复制', 'success')
+    } catch (err) {
+      showToast(getClipboardFailureMessage('复制部分失败原因失败', err), 'error')
     }
   }
 
@@ -589,6 +600,25 @@ export default function DetailModal() {
               <span>创建于 {formatTime(task.createdAt)}</span>
               {formatDuration() && <span> · 耗时 {formatDuration()}</span>}
             </div>
+            {task.status === 'done' && partialError && (
+              <div className="mb-4 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="font-medium">部分失败</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyPartialError}
+                    className="rounded-full border border-amber-300/70 bg-white/70 px-2 py-0.5 text-amber-700 transition hover:bg-amber-100 dark:border-amber-300/20 dark:bg-white/[0.04] dark:text-amber-100 dark:hover:bg-amber-500/10"
+                    aria-label="复制部分失败原因"
+                    title="复制部分失败原因"
+                  >
+                    复制
+                  </button>
+                </div>
+                <p className="max-h-24 overflow-auto whitespace-pre-wrap break-all leading-5">
+                  {partialError}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* 操作按钮 */}

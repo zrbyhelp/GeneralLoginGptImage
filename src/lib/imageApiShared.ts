@@ -37,6 +37,8 @@ export interface CallApiResult {
   apiModel?: string
   /** 生成成功但第三方图集上传失败时的提示 */
   galleryUploadError?: string | null
+  /** 多图生成部分失败时的错误摘要；成功图片仍会正常返回。 */
+  partialError?: string | null
   /** 服务端确认的隐私模式状态 */
   privacyMode?: boolean
 }

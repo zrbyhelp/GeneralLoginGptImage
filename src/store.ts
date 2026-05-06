@@ -504,6 +504,7 @@ async function completeRecoveredFalTask(task: TaskRecord, result: Awaited<Return
     actualParams: undefined,
     actualParamsByImage: undefined,
     revisedPromptByImage: undefined,
+    partialError: null,
     status: 'done',
     error: null,
     falRecoverable: false,
@@ -793,6 +794,7 @@ async function executeTask(taskId: string) {
       actualParams: shouldStoreApiResponseMetadata ? { ...result.actualParams, n: outputIds.length } : undefined,
       actualParamsByImage: actualParamsByImage && Object.keys(actualParamsByImage).length > 0 ? actualParamsByImage : undefined,
       revisedPromptByImage: revisedPromptByImage && Object.keys(revisedPromptByImage).length > 0 ? revisedPromptByImage : undefined,
+      partialError: result.partialError || null,
       status: 'done',
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
@@ -800,6 +802,9 @@ async function executeTask(taskId: string) {
     })
 
     useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
+    if (result.partialError) {
+      useStore.getState().showToast('部分图片生成失败，已保留成功结果', 'error')
+    }
     if (result.galleryUploadError) {
       useStore.getState().showToast(`图集上传失败：${result.galleryUploadError}`, 'error')
     }
