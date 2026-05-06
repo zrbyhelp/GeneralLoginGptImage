@@ -32,6 +32,16 @@ async function flushPromises(times = 8) {
   }
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: 'task-a',
@@ -188,6 +198,28 @@ describe('submit task safeguards', () => {
       '部分图片生成失败，已保留成功结果',
       'error',
     )
+  })
+
+  it('does not fail OpenAI tasks with a client-side timeout while the server request is still pending', async () => {
+    const deferred = createDeferred<{ images: string[] }>()
+    apiMocks.callImageApi.mockReturnValue(deferred.promise)
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 10 },
+      params: { ...DEFAULT_PARAMS, n: 3 },
+    })
+
+    await submitTask({ confirmed: true })
+    await flushPromises()
+    vi.advanceTimersByTime(60_000)
+    await flushPromises()
+
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      status: 'running',
+      error: null,
+    })
+
+    deferred.resolve({ images: [] })
+    await flushPromises()
   })
 
   it('blocks submission while another image is generating', async () => {

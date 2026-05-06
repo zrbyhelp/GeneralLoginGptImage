@@ -37,17 +37,12 @@ import { getInitialDisplayPreferences, type AppLocale, type AppTheme } from './l
 const imageCache = new Map<string, string>()
 const FAL_RECOVERY_POLL_MS = 10_000
 const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const OPENAI_INTERRUPTED_ERROR = '请求中断'
 const WAIT_FOR_RUNNING_TASK_MESSAGE = '请等待当前图片生成完成后再继续生成'
 
 type SubmitTaskOptions = {
   allowFullMask?: boolean
   confirmed?: boolean
-}
-
-function createOpenAITimeoutError(timeoutSeconds: number) {
-  return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。`
 }
 
 export function getCachedImage(id: string): string | undefined {
@@ -403,41 +398,6 @@ export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Dat
   return { tasks: updatedTasks, interruptedTasks }
 }
 
-function clearOpenAIWatchdogTimer(taskId: string) {
-  const timer = openAIWatchdogTimers.get(taskId)
-  if (timer) clearTimeout(timer)
-  openAIWatchdogTimers.delete(taskId)
-}
-
-function failOpenAITaskIfStillRunning(taskId: string, error: string, now = Date.now()) {
-  const task = useStore.getState().tasks.find((item) => item.id === taskId)
-  if (!task || !isRunningOpenAITask(task)) return false
-
-  updateTaskInStore(taskId, {
-    status: 'error',
-    error,
-    falRecoverable: false,
-    finishedAt: now,
-    elapsed: Math.max(0, now - task.createdAt),
-  })
-  return true
-}
-
-function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number) {
-  clearOpenAIWatchdogTimer(taskId)
-  const task = useStore.getState().tasks.find((item) => item.id === taskId)
-  if (!task || !isRunningOpenAITask(task)) return
-
-  const timeoutMs = Math.max(0, timeoutSeconds * 1000)
-  const remainingMs = Math.max(0, timeoutMs - (Date.now() - task.createdAt))
-  const timer = setTimeout(() => {
-    openAIWatchdogTimers.delete(taskId)
-    const failed = failOpenAITaskIfStillRunning(taskId, createOpenAITimeoutError(timeoutSeconds))
-    if (failed) useStore.getState().showToast('OpenAI 任务请求超时', 'error')
-  }, remainingMs)
-  openAIWatchdogTimers.set(taskId, timer)
-}
-
 export function showCodexCliPrompt(force = false, reason = '接口返回的提示词已被改写') {
   const state = useStore.getState()
   const settings = state.settings
@@ -726,10 +686,6 @@ async function executeTask(taskId: string) {
     ? { requestId: task.falRequestId, endpoint: task.falEndpoint }
     : null
 
-  if (taskProvider === 'openai') {
-    scheduleOpenAIWatchdog(taskId, activeProfile.timeout * Math.max(1, task.params.n || 1))
-  }
-
   try {
     // 获取输入图片 data URLs
     const inputDataUrls: string[] = []
@@ -785,7 +741,6 @@ async function executeTask(taskId: string) {
     // 更新任务
     const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') return
-    clearOpenAIWatchdogTimer(taskId)
     updateTaskInStore(taskId, {
       apiProvider: result.apiProvider ?? task.apiProvider,
       apiProfileName: result.apiProfileName ?? task.apiProfileName,
@@ -818,7 +773,6 @@ async function executeTask(taskId: string) {
       useStore.getState().clearMaskDraft()
     }
   } catch (err) {
-    clearOpenAIWatchdogTimer(taskId)
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
     if (latestTask.status !== 'running') return
     const latestFalRequestInfo = falRequestInfo ?? (latestTask.falRequestId && latestTask.falEndpoint
