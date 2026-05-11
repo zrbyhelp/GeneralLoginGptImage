@@ -223,6 +223,25 @@ https://cooksleep.github.io/gpt_image_playground?apiUrl={address}&apiKey={key}
 - **样式方案**：[Tailwind CSS 3](https://tailwindcss.com/)
 - **状态管理**：[Zustand](https://zustand.docs.pmnd.rs/)
 
+## 💖 捐赠支持
+
+如果这个项目对你有帮助，欢迎扫码支持维护。
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <b>微信支付</b><br>
+        <img src="捐赠/微信图片_20260511124938_184_76.jpg" alt="微信支付捐赠二维码" width="280" />
+      </td>
+      <td align="center">
+        <b>支付宝</b><br>
+        <img src="捐赠/微信图片_20260511124939_185_76.jpg" alt="支付宝捐赠二维码" width="280" />
+      </td>
+    </tr>
+  </table>
+</div>
+
 ## 📄 许可证 & 致谢
 
 本项目基于 [MIT License](LICENSE) 开源。
