@@ -67,7 +67,7 @@ export interface MaskDraft {
 
 // ===== 任务记录 =====
 
-export type TaskStatus = 'running' | 'done' | 'error'
+export type TaskStatus = 'queued' | 'running' | 'done' | 'error'
 
 export interface TaskRecord {
   id: string
@@ -85,6 +85,14 @@ export interface TaskRecord {
   falEndpoint?: string
   /** fal.ai 任务连接断开后是否等待自动恢复 */
   falRecoverable?: boolean
+  /** 服务端生成队列 job id，用于刷新后恢复排队/生成状态 */
+  queueJobId?: string
+  /** 服务端队列位置，1 表示下一张等待启动 */
+  queuePosition?: number | null
+  /** 服务端队列已结束的图片单元数（成功或失败） */
+  queueCompletedImages?: number
+  /** 服务端队列总图片单元数 */
+  queueTotalImages?: number
   /** 是否跳过第三方图集上传 */
   privacyMode?: boolean
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */

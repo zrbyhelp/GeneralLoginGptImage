@@ -72,6 +72,8 @@ function initSchema(db: SqliteDatabase) {
       codex_cli INTEGER NOT NULL,
       hourly_image_limit INTEGER NOT NULL,
       privacy_hourly_image_limit INTEGER NOT NULL,
+      service_concurrent_image_limit INTEGER NOT NULL,
+      user_concurrent_image_limit INTEGER NOT NULL,
       gallery_upload_url TEXT NOT NULL,
       gallery_upload_token TEXT NOT NULL,
       updated_at TEXT
@@ -149,6 +151,12 @@ function initSchema(db: SqliteDatabase) {
   )
   if (!adminSettingColumns.has('privacy_hourly_image_limit')) {
     db.exec('ALTER TABLE admin_settings ADD COLUMN privacy_hourly_image_limit INTEGER NOT NULL DEFAULT 5')
+  }
+  if (!adminSettingColumns.has('service_concurrent_image_limit')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN service_concurrent_image_limit INTEGER NOT NULL DEFAULT 3')
+  }
+  if (!adminSettingColumns.has('user_concurrent_image_limit')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN user_concurrent_image_limit INTEGER NOT NULL DEFAULT 3')
   }
   if (!adminSettingColumns.has('gallery_upload_url')) {
     db.exec("ALTER TABLE admin_settings ADD COLUMN gallery_upload_url TEXT NOT NULL DEFAULT 'https://imglist.zrbyhelp.com/api/uploads/third-party'")

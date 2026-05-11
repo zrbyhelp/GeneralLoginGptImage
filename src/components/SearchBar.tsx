@@ -32,6 +32,7 @@ export default function SearchBar() {
             options={[
               { label: '全部状态', value: 'all' },
               { label: '已完成', value: 'done' },
+              { label: '排队中', value: 'queued' },
               { label: '生成中', value: 'running' },
               { label: '失败', value: 'error' },
             ]}

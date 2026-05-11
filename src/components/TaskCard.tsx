@@ -103,7 +103,7 @@ export default function TaskCard({
 
   // 定时更新运行中任务的计时
   useEffect(() => {
-    if (task.status !== 'running' && !(task.status === 'error' && task.falRecoverable)) return
+    if (task.status !== 'queued' && task.status !== 'running' && !(task.status === 'error' && task.falRecoverable)) return
     const id = setInterval(() => setNow(Date.now()), 1000)
     setNow(Date.now())
     return () => clearInterval(id)
@@ -150,7 +150,7 @@ export default function TaskCard({
 
   const duration = (() => {
     let seconds: number
-    if (task.status === 'running' || task.falRecoverable) {
+    if (task.status === 'queued' || task.status === 'running' || task.falRecoverable) {
       seconds = Math.floor((now - task.createdAt) / 1000)
     } else if (task.elapsed != null) {
       seconds = Math.floor(task.elapsed / 1000)
@@ -166,8 +166,12 @@ export default function TaskCard({
     : task.actualParams
   const isSwipeReady = Math.abs(swipeOffset) >= 40
   const showSwipeAction = isSwipeReady || swipeActionActive
+  const isQueued = task.status === 'queued'
   const isFalReconnecting = task.status === 'error' && task.falRecoverable
-  const showRunningTimer = task.status === 'running' || isFalReconnecting
+  const showRunningTimer = isQueued || task.status === 'running' || isFalReconnecting
+  const queueText = task.queuePosition != null && task.queuePosition > 0
+    ? `排队中 · 前方 ${Math.max(0, task.queuePosition - 1)} 张`
+    : '排队中'
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
       ? 'bg-gray-500 dark:bg-gray-600'
@@ -197,7 +201,9 @@ export default function TaskCard({
         className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
           !isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'
         } ${
-          task.status === 'running'
+          isQueued
+            ? 'border-amber-300 dark:border-amber-400/50'
+            : task.status === 'running'
             ? 'border-blue-400 generating'
             : isSelected
             ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50'
@@ -230,6 +236,19 @@ export default function TaskCard({
       <div className="flex h-40">
         {/* 左侧图片区域 */}
         <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">
+          {isQueued && (
+            <div className="flex flex-col items-center gap-1 px-2 text-center">
+              <svg
+                className="w-8 h-8 text-amber-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              <span className="text-xs text-amber-500 leading-tight">{queueText}</span>
+            </div>
+          )}
           {task.status === 'running' && (
             <div className="flex flex-col items-center gap-2">
               <svg

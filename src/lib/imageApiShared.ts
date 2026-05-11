@@ -18,6 +18,7 @@ export interface CallApiOptions {
   maskDataUrl?: string
   privacyMode?: boolean
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
+  onQueueStatusChange?: (status: ImageGenerationJobStatus) => void
 }
 
 export interface CallApiResult {
@@ -41,6 +42,19 @@ export interface CallApiResult {
   partialError?: string | null
   /** 服务端确认的隐私模式状态 */
   privacyMode?: boolean
+}
+
+export type ImageGenerationJobState = 'queued' | 'running' | 'done' | 'error'
+
+export interface ImageGenerationJobStatus extends Partial<CallApiResult> {
+  jobId: string
+  status: ImageGenerationJobState
+  queuePosition: number | null
+  totalImages: number
+  completedImages: number
+  runningImages: number
+  queuedImages: number
+  error: string | null
 }
 
 export function isHttpUrl(value: unknown): value is string {

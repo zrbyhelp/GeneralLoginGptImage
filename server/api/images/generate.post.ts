@@ -2,9 +2,8 @@ import { createError } from 'h3'
 import type { TaskParams } from '../../../src/types'
 import { requireUser, isAdminUser } from '../../utils/auth'
 import { assertApiConfigUsable, getAdminSettings } from '../../utils/admin-settings'
-import { callServerImageApi } from '../../utils/server-image-api'
-import { countRecentGeneratedImages, recordGenerationUsage } from '../../utils/generation-usage'
-import { uploadThirdPartyGalleryContent } from '../../utils/gallery-upload'
+import { countRecentGeneratedImages } from '../../utils/generation-usage'
+import { createImageGenerationJob } from '../../utils/image-generation-queue'
 
 const DEFAULT_PARAMS: TaskParams = {
   size: 'auto',
@@ -75,6 +74,7 @@ function normalizeParams(input: unknown, provider: string): TaskParams {
 
 export default defineEventHandler(async (event) => {
   const user = await requireUser(event)
+  const isAdmin = isAdminUser(user)
   const body = await readBody<Record<string, unknown>>(event)
   if (!body || typeof body !== 'object') {
     throw createError({ statusCode: 400, statusMessage: '请求体无效' })
@@ -97,7 +97,7 @@ export default defineEventHandler(async (event) => {
   const params = normalizeParams(body.params, apiConfig.provider)
   const privacyMode = body.privacyMode === true
 
-  if (!isAdminUser(user)) {
+  if (!isAdmin) {
     const hourlyImageLimit = privacyMode ? settings.privacyHourlyImageLimit : settings.hourlyImageLimit
     const used = await countRecentGeneratedImages(user.id, privacyMode)
     const remaining = Math.max(0, hourlyImageLimit - used)
@@ -110,53 +110,15 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  try {
-    const result = await callServerImageApi({
-      config: apiConfig,
-      prompt,
-      params,
-      inputImageDataUrls,
-      maskDataUrl,
-    })
-
-    if (result.images.length > 0) {
-      await recordGenerationUsage({
-        userId: user.id,
-        imageCount: result.images.length,
-        privacyMode,
-      })
-    }
-
-    let galleryUploadError: string | null = null
-    if (!privacyMode && result.images.length > 0) {
-      try {
-        await uploadThirdPartyGalleryContent({
-          uploadUrl: settings.galleryUploadUrl,
-          uploadToken: settings.galleryUploadToken,
-          prompt,
-          params,
-          provider: apiConfig.provider,
-          model: apiConfig.model,
-          images: result.images,
-          referenceImages: inputImageDataUrls,
-          user,
-          timeoutSeconds: apiConfig.timeout,
-        })
-      } catch (error) {
-        galleryUploadError = error instanceof Error ? error.message : String(error)
-      }
-    }
-
-    return {
-      ...result,
-      apiProvider: apiConfig.provider,
-      apiProfileName: '统一配置',
-      apiModel: apiConfig.model,
-      privacyMode,
-      galleryUploadError,
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw createError({ statusCode: 502, statusMessage: message })
-  }
+  return createImageGenerationJob({
+    user,
+    isAdmin,
+    settings,
+    apiConfig,
+    prompt,
+    params,
+    inputImageDataUrls,
+    maskDataUrl,
+    privacyMode,
+  })
 })

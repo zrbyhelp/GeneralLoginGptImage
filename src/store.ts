@@ -23,7 +23,8 @@ import {
   clearImages,
   storeImage,
 } from './lib/db'
-import { callImageApi } from './lib/api'
+import { callImageApi, ImageApiError, pollImageGenerationJob } from './lib/api'
+import type { CallApiResult, ImageGenerationJobStatus } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult, getFalQueueStatus } from './lib/falAiImageApi'
 import { validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
@@ -139,7 +140,7 @@ interface AppState {
   // 搜索和筛选
   searchQuery: string
   setSearchQuery: (q: string) => void
-  filterStatus: 'all' | 'running' | 'done' | 'error'
+  filterStatus: 'all' | 'queued' | 'running' | 'done' | 'error'
   setFilterStatus: (status: AppState['filterStatus']) => void
   filterFavorite: boolean
   setFilterFavorite: (f: boolean) => void
@@ -373,8 +374,33 @@ function isOpenAITask(task: TaskRecord) {
   return (task.apiProvider ?? 'openai') === 'openai'
 }
 
+function isTaskInFlight(task: TaskRecord) {
+  return task.status === 'queued' || task.status === 'running'
+}
+
 function isRunningOpenAITask(task: TaskRecord) {
-  return task.status === 'running' && isOpenAITask(task)
+  return isTaskInFlight(task) && !task.queueJobId && isOpenAITask(task)
+}
+
+function applyQueueStatusToTask(taskId: string, status: ImageGenerationJobStatus) {
+  if (status.status !== 'queued' && status.status !== 'running') return
+  const current = useStore.getState().tasks.find((task) => task.id === taskId)
+  if (!current || !isTaskInFlight(current)) return
+  updateTaskInStore(taskId, {
+    queueJobId: status.jobId,
+    queuePosition: status.queuePosition,
+    queueCompletedImages: status.completedImages,
+    queueTotalImages: status.totalImages,
+    status: status.status,
+    error: null,
+  })
+}
+
+function isUserConcurrentLimitError(error: unknown) {
+  if (!(error instanceof ImageApiError) || error.statusCode !== 429) return false
+  const record = error.data && typeof error.data === 'object' ? error.data as Record<string, unknown> : {}
+  const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
+  return data.reason === 'userConcurrentImageLimit' || error.message.includes('目前最大同时生成张数')
 }
 
 export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Date.now()) {
@@ -387,6 +413,7 @@ export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Dat
       status: 'error',
       error: OPENAI_INTERRUPTED_ERROR,
       falRecoverable: false,
+      queuePosition: null,
       finishedAt: now,
       elapsed: Math.max(0, now - task.createdAt),
     }
@@ -531,6 +558,10 @@ export async function initStore() {
   await Promise.all(interruptedTasks.map((task) => putTask(task)))
   useStore.getState().setTasks(tasks)
   for (const task of tasks) {
+    if (task.queueJobId && isTaskInFlight(task)) {
+      void resumeQueuedImageJob(task.id)
+      continue
+    }
     if (
       task.apiProvider === 'fal' &&
       task.falRequestId &&
@@ -568,6 +599,74 @@ export async function initStore() {
     .filter((img) => img.dataUrl)
   if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
     useStore.getState().setInputImages(restoredInputImages)
+  }
+}
+
+async function finishTaskWithResult(
+  taskId: string,
+  task: TaskRecord,
+  result: CallApiResult,
+  maskDataUrl?: string,
+) {
+  const latestBeforeSuccess = useStore.getState().tasks.find((t) => t.id === taskId)
+  if (!latestBeforeSuccess || !isTaskInFlight(latestBeforeSuccess)) return
+
+  const outputIds: string[] = []
+  for (const dataUrl of result.images) {
+    const imgId = await storeImage(dataUrl, 'generated')
+    imageCache.set(imgId, dataUrl)
+    outputIds.push(imgId)
+  }
+
+  const taskProvider = task.apiProvider ?? result.apiProvider ?? 'openai'
+  const shouldStoreApiResponseMetadata = taskProvider !== 'fal'
+  const actualParamsByImage = shouldStoreApiResponseMetadata ? result.actualParamsList?.reduce<Record<string, Partial<TaskParams>>>((acc, params, index) => {
+    const imgId = outputIds[index]
+    if (imgId && params && Object.keys(params).length > 0) acc[imgId] = params
+    return acc
+  }, {}) : undefined
+  const revisedPromptByImage = shouldStoreApiResponseMetadata ? result.revisedPrompts?.reduce<Record<string, string>>((acc, revisedPrompt, index) => {
+    const imgId = outputIds[index]
+    if (imgId && revisedPrompt && revisedPrompt.trim()) acc[imgId] = revisedPrompt
+    return acc
+  }, {}) : undefined
+
+  const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
+  if (!latestBeforeUpdate || !isTaskInFlight(latestBeforeUpdate)) return
+  updateTaskInStore(taskId, {
+    apiProvider: result.apiProvider ?? task.apiProvider,
+    apiProfileName: result.apiProfileName ?? task.apiProfileName,
+    apiModel: result.apiModel ?? task.apiModel,
+    outputImages: outputIds,
+    actualParams: shouldStoreApiResponseMetadata ? { ...result.actualParams, n: outputIds.length } : undefined,
+    actualParamsByImage: actualParamsByImage && Object.keys(actualParamsByImage).length > 0 ? actualParamsByImage : undefined,
+    revisedPromptByImage: revisedPromptByImage && Object.keys(revisedPromptByImage).length > 0 ? revisedPromptByImage : undefined,
+    partialError: result.partialError || null,
+    status: 'done',
+    queuePosition: null,
+    queueCompletedImages: result.images.length,
+    queueTotalImages: task.params.n,
+    finishedAt: Date.now(),
+    elapsed: Date.now() - task.createdAt,
+    falRecoverable: false,
+  })
+
+  useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
+  if (result.partialError) {
+    useStore.getState().showToast('部分图片生成失败，已保留成功结果', 'error')
+  }
+  if (result.galleryUploadError) {
+    useStore.getState().showToast(`图集上传失败：${result.galleryUploadError}`, 'error')
+  }
+
+  const currentMask = useStore.getState().maskDraft
+  if (
+    maskDataUrl &&
+    currentMask &&
+    currentMask.targetImageId === task.maskTargetImageId &&
+    currentMask.maskDataUrl === maskDataUrl
+  ) {
+    useStore.getState().clearMaskDraft()
   }
 }
 
@@ -650,8 +749,11 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     maskTargetImageId,
     maskImageId,
     outputImages: [],
-    status: 'running',
+    status: 'queued',
     error: null,
+    queuePosition: null,
+    queueCompletedImages: 0,
+    queueTotalImages: normalizedParams.n,
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
@@ -661,11 +763,6 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
   useStore.getState().setTasks([task, ...latestTasks])
   await putTask(task)
 
-  if (settings.clearInputAfterSubmit) {
-    useStore.getState().setPrompt('')
-    useStore.getState().clearInputImages()
-  }
-
   // 异步调用 API
   executeTask(taskId)
 }
@@ -674,11 +771,25 @@ async function executeTask(taskId: string) {
   const { settings } = useStore.getState()
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
-  const activeProfile = getActiveApiProfile(settings)
-  const taskProvider = task.apiProvider ?? activeProfile.provider
   let falRequestInfo: { requestId: string; endpoint: string } | null = task.falRequestId && task.falEndpoint
     ? { requestId: task.falRequestId, endpoint: task.falEndpoint }
     : null
+  let clearedSubmittedInput = false
+
+  const clearSubmittedInputIfUnchanged = () => {
+    if (clearedSubmittedInput || !settings.clearInputAfterSubmit) return
+    const state = useStore.getState()
+    const currentInputIds = state.inputImages.map((image) => image.id)
+    const samePrompt = state.prompt.trim() === task.prompt
+    const sameImages =
+      currentInputIds.length === task.inputImageIds.length &&
+      currentInputIds.every((id, index) => id === task.inputImageIds[index])
+    if (!samePrompt || !sameImages) return
+
+    state.setPrompt('')
+    state.clearInputImages()
+    clearedSubmittedInput = true
+  }
 
   try {
     // 获取输入图片 data URLs
@@ -709,66 +820,23 @@ async function executeTask(taskId: string) {
           falRecoverable: false,
         })
       },
+      onQueueStatusChange: (status) => {
+        clearSubmittedInputIfUnchanged()
+        applyQueueStatusToTask(taskId, status)
+      },
     })
+    clearSubmittedInputIfUnchanged()
 
-    const latestBeforeSuccess = useStore.getState().tasks.find((t) => t.id === taskId)
-    if (!latestBeforeSuccess || latestBeforeSuccess.status !== 'running') return
-
-    // 存储输出图片
-    const outputIds: string[] = []
-    for (const dataUrl of result.images) {
-      const imgId = await storeImage(dataUrl, 'generated')
-      imageCache.set(imgId, dataUrl)
-      outputIds.push(imgId)
-    }
-    const shouldStoreApiResponseMetadata = taskProvider !== 'fal'
-    const actualParamsByImage = shouldStoreApiResponseMetadata ? result.actualParamsList?.reduce<Record<string, Partial<TaskParams>>>((acc, params, index) => {
-      const imgId = outputIds[index]
-      if (imgId && params && Object.keys(params).length > 0) acc[imgId] = params
-      return acc
-    }, {}) : undefined
-    const revisedPromptByImage = shouldStoreApiResponseMetadata ? result.revisedPrompts?.reduce<Record<string, string>>((acc, revisedPrompt, index) => {
-      const imgId = outputIds[index]
-      if (imgId && revisedPrompt && revisedPrompt.trim()) acc[imgId] = revisedPrompt
-      return acc
-    }, {}) : undefined
-    // 更新任务
-    const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
-    if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') return
-    updateTaskInStore(taskId, {
-      apiProvider: result.apiProvider ?? task.apiProvider,
-      apiProfileName: result.apiProfileName ?? task.apiProfileName,
-      apiModel: result.apiModel ?? task.apiModel,
-      outputImages: outputIds,
-      actualParams: shouldStoreApiResponseMetadata ? { ...result.actualParams, n: outputIds.length } : undefined,
-      actualParamsByImage: actualParamsByImage && Object.keys(actualParamsByImage).length > 0 ? actualParamsByImage : undefined,
-      revisedPromptByImage: revisedPromptByImage && Object.keys(revisedPromptByImage).length > 0 ? revisedPromptByImage : undefined,
-      partialError: result.partialError || null,
-      status: 'done',
-      finishedAt: Date.now(),
-      elapsed: Date.now() - task.createdAt,
-      falRecoverable: false,
-    })
-
-    useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
-    if (result.partialError) {
-      useStore.getState().showToast('部分图片生成失败，已保留成功结果', 'error')
-    }
-    if (result.galleryUploadError) {
-      useStore.getState().showToast(`图集上传失败：${result.galleryUploadError}`, 'error')
-    }
-    const currentMask = useStore.getState().maskDraft
-    if (
-      maskDataUrl &&
-      currentMask &&
-      currentMask.targetImageId === task.maskTargetImageId &&
-      currentMask.maskDataUrl === maskDataUrl
-    ) {
-      useStore.getState().clearMaskDraft()
-    }
+    await finishTaskWithResult(taskId, task, result, maskDataUrl)
   } catch (err) {
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
-    if (latestTask.status !== 'running') return
+    if (!isTaskInFlight(latestTask)) return
+    if (isUserConcurrentLimitError(err)) {
+      useStore.getState().setTasks(useStore.getState().tasks.filter((item) => item.id !== taskId))
+      await dbDeleteTask(taskId)
+      useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
+      return
+    }
     const latestFalRequestInfo = falRequestInfo ?? (latestTask.falRequestId && latestTask.falEndpoint
       ? { requestId: latestTask.falRequestId, endpoint: latestTask.falEndpoint }
       : null)
@@ -787,6 +855,7 @@ async function executeTask(taskId: string) {
       updateTaskInStore(taskId, {
         status: 'error',
         error: err instanceof Error ? err.message : String(err),
+        queuePosition: null,
         falRecoverable: false,
         finishedAt: Date.now(),
         elapsed: Date.now() - task.createdAt,
@@ -798,6 +867,30 @@ async function executeTask(taskId: string) {
     for (const imgId of task.inputImageIds) {
       imageCache.delete(imgId)
     }
+  }
+}
+
+async function resumeQueuedImageJob(taskId: string) {
+  const task = useStore.getState().tasks.find((item) => item.id === taskId)
+  if (!task?.queueJobId || !isTaskInFlight(task)) return
+
+  try {
+    const result = await pollImageGenerationJob(task.queueJobId, {
+      onQueueStatusChange: (status) => applyQueueStatusToTask(taskId, status),
+    })
+    const latest = useStore.getState().tasks.find((item) => item.id === taskId) ?? task
+    await finishTaskWithResult(taskId, latest, result)
+  } catch (err) {
+    const latest = useStore.getState().tasks.find((item) => item.id === taskId) ?? task
+    if (!isTaskInFlight(latest)) return
+    updateTaskInStore(taskId, {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+      queuePosition: null,
+      falRecoverable: false,
+      finishedAt: Date.now(),
+      elapsed: Date.now() - latest.createdAt,
+    })
   }
 }
 
@@ -841,8 +934,11 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,
     outputImages: [],
-    status: 'running',
+    status: 'queued',
     error: null,
+    queuePosition: null,
+    queueCompletedImages: 0,
+    queueTotalImages: normalizedParams.n,
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,

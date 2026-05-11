@@ -17,6 +17,8 @@ type AdminSettings = {
   }
   hourlyImageLimit: number
   privacyHourlyImageLimit: number
+  serviceConcurrentImageLimit: number
+  userConcurrentImageLimit: number
   galleryUploadUrl: string
   galleryUploadToken: string
   updatedAt: string | null
@@ -34,6 +36,8 @@ const DEFAULT_SETTINGS: AdminSettings = {
   },
   hourlyImageLimit: 20,
   privacyHourlyImageLimit: 5,
+  serviceConcurrentImageLimit: 3,
+  userConcurrentImageLimit: 3,
   galleryUploadUrl: 'https://imglist.zrbyhelp.com/api/uploads/third-party',
   galleryUploadToken: '',
   updatedAt: null,
@@ -136,6 +140,28 @@ export default function AdminAuditModal() {
               <input
                 value={settings.privacyHourlyImageLimit}
                 onChange={(event) => setSettings((prev) => ({ ...prev, privacyHourlyImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
+                min={1}
+                max={1000}
+                type="number"
+                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">全服务同时生成图片数</span>
+              <input
+                value={settings.serviceConcurrentImageLimit}
+                onChange={(event) => setSettings((prev) => ({ ...prev, serviceConcurrentImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
+                min={1}
+                max={1000}
+                type="number"
+                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">单账号同时生成图片数</span>
+              <input
+                value={settings.userConcurrentImageLimit}
+                onChange={(event) => setSettings((prev) => ({ ...prev, userConcurrentImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
                 min={1}
                 max={1000}
                 type="number"

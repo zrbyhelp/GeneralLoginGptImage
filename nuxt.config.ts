@@ -19,6 +19,8 @@ export default defineNuxtConfig({
     dbPath: 'storage/app-data/app.db',
     defaultHourlyImageLimit: '20',
     defaultPrivacyHourlyImageLimit: '5',
+    defaultServiceConcurrentImageLimit: '3',
+    defaultUserConcurrentImageLimit: '3',
     galleryUploadUrl: 'https://imglist.zrbyhelp.com/api/uploads/third-party',
     galleryUploadToken: '',
     apiProvider: 'openai',

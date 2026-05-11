@@ -54,6 +54,8 @@ beforeEach(() => {
     apiTimeout: '600',
     apiCodexCli: 'false',
     defaultHourlyImageLimit: '20',
+    defaultServiceConcurrentImageLimit: '3',
+    defaultUserConcurrentImageLimit: '3',
     appDataDir: tempRoot,
     storageDir: join(tempRoot, 'generated-images'),
   }))
@@ -78,6 +80,8 @@ describe('SQLite-backed server storage', () => {
       },
       hourlyImageLimit: 7,
       privacyHourlyImageLimit: 3,
+      serviceConcurrentImageLimit: 4,
+      userConcurrentImageLimit: 2,
       galleryUploadUrl: 'https://imglist.example.com/api/uploads/third-party',
       galleryUploadToken: 'upload-token',
     })
@@ -91,6 +95,8 @@ describe('SQLite-backed server storage', () => {
     expect(persisted.apiConfig.codexCli).toBe(true)
     expect(persisted.hourlyImageLimit).toBe(7)
     expect(persisted.privacyHourlyImageLimit).toBe(3)
+    expect(persisted.serviceConcurrentImageLimit).toBe(4)
+    expect(persisted.userConcurrentImageLimit).toBe(2)
     expect(persisted.galleryUploadUrl).toBe('https://imglist.example.com/api/uploads/third-party')
     expect(persisted.galleryUploadToken).toBe('upload-token')
     expect(readdirSync(tempRoot).filter((fileName) => fileName.endsWith('.json'))).toEqual([])

@@ -3,8 +3,15 @@ import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
 
+async function flushPromises(times = 4) {
+  for (let i = 0; i < times; i += 1) {
+    await Promise.resolve()
+  }
+}
+
 describe('callImageApi', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -133,6 +140,71 @@ describe('callImageApi', () => {
       galleryUploadError: null,
       partialError: '第 2 张生成失败：HTTP 504',
     })
+  })
+
+  it('polls queued server jobs until completion', async () => {
+    vi.useFakeTimers()
+    const statuses: string[] = []
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        jobId: 'job-a',
+        status: 'queued',
+        queuePosition: 1,
+        totalImages: 2,
+        completedImages: 0,
+        runningImages: 0,
+        queuedImages: 2,
+        error: null,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        jobId: 'job-a',
+        status: 'running',
+        queuePosition: null,
+        totalImages: 2,
+        completedImages: 0,
+        runningImages: 1,
+        queuedImages: 1,
+        error: null,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        jobId: 'job-a',
+        status: 'done',
+        queuePosition: null,
+        totalImages: 2,
+        completedImages: 2,
+        runningImages: 0,
+        queuedImages: 0,
+        error: null,
+        images: ['data:image/png;base64,a', 'data:image/png;base64,b'],
+        apiProvider: 'openai',
+        apiProfileName: '统一配置',
+        apiModel: 'gpt-image-2',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const promise = callImageApi({
+      settings: DEFAULT_SETTINGS,
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 2 },
+      inputImageDataUrls: [],
+      onQueueStatusChange: (status) => statuses.push(status.status),
+    })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1500)
+
+    await expect(promise).resolves.toMatchObject({
+      images: ['data:image/png;base64,a', 'data:image/png;base64,b'],
+      apiProvider: 'openai',
+    })
+    expect(statuses).toEqual(['queued', 'running', 'done'])
   })
 
   it('throws server error messages', async () => {

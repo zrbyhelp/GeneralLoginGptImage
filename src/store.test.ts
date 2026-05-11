@@ -19,6 +19,18 @@ const dbMocks = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   callImageApi: vi.fn(),
+  pollImageGenerationJob: vi.fn(),
+  ImageApiError: class ImageApiError extends Error {
+    statusCode: number
+    data: unknown
+
+    constructor(message: string, statusCode: number, data?: unknown) {
+      super(message)
+      this.name = 'ImageApiError'
+      this.statusCode = statusCode
+      this.data = data
+    }
+  },
 }))
 
 vi.mock('./lib/db', () => dbMocks)
@@ -175,7 +187,7 @@ describe('submit task safeguards', () => {
 
     expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'prompt',
-      status: 'running',
+      status: 'queued',
     }))
     expect(useStore.getState().prompt).toBe('')
   })
@@ -214,7 +226,7 @@ describe('submit task safeguards', () => {
     await flushPromises()
 
     expect(useStore.getState().tasks[0]).toMatchObject({
-      status: 'running',
+      status: 'queued',
       error: null,
     })
 
@@ -232,10 +244,28 @@ describe('submit task safeguards', () => {
 
     expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'prompt',
-      status: 'running',
+      status: 'queued',
     }))
     expect(useStore.getState().tasks).toHaveLength(2)
     expect(useStore.getState().tasks[1]).toEqual(runningTask)
+  })
+
+  it('keeps the input when the server rejects the account concurrency limit', async () => {
+    apiMocks.callImageApi.mockRejectedValue(new apiMocks.ImageApiError(
+      '目前最大同时生成张数是 3，请等待生成完成后继续',
+      429,
+      { data: { reason: 'userConcurrentImageLimit', limit: 3 } },
+    ))
+
+    await submitTask({ confirmed: true })
+    await flushPromises()
+
+    expect(useStore.getState().tasks).toEqual([])
+    expect(useStore.getState().prompt).toBe('prompt')
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(
+      '目前最大同时生成张数是 3，请等待生成完成后继续',
+      'error',
+    )
   })
 })
 
