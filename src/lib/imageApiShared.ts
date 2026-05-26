@@ -16,6 +16,9 @@ export interface CallApiOptions {
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
   maskDataUrl?: string
+  uploadToGallery?: boolean
+  usePremiumApi?: boolean
+  /** 旧字段：true 表示跳过第三方图集上传 */
   privacyMode?: boolean
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
   onQueueStatusChange?: (status: ImageGenerationJobStatus) => void
@@ -42,6 +45,16 @@ export interface CallApiResult {
   partialError?: string | null
   /** 服务端确认的隐私模式状态 */
   privacyMode?: boolean
+  /** 服务端确认的图集上传状态 */
+  uploadToGallery?: boolean
+  /** 是否使用 1K+ 专用 API */
+  usePremiumApi?: boolean
+  /** 实际扣除的积分 */
+  chargedPoints?: number
+  /** 实际退款的积分 */
+  refundedPoints?: number
+  /** 扣分后的最新余额 */
+  pointsBalance?: number
 }
 
 export type ImageGenerationJobState = 'queued' | 'running' | 'done' | 'error'

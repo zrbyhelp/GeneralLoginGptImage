@@ -92,10 +92,13 @@ export default defineEventHandler(async (event) => {
     : undefined
 
   const settings = await getAdminSettings()
-  const apiConfig = settings.apiConfig
-  assertApiConfigUsable(apiConfig)
+  const uploadToGallery = body.uploadToGallery === true || body.privacyMode === false
+  const usePremiumApi = body.usePremiumApi === true
+  const privacyMode = !uploadToGallery
+  const apiConfig = usePremiumApi ? settings.premiumApiConfig : settings.apiConfig
   const params = normalizeParams(body.params, apiConfig.provider)
-  const privacyMode = body.privacyMode === true
+  const costPerImage = usePremiumApi ? settings.premiumPointCost : settings.standardPointCost
+  assertApiConfigUsable(apiConfig, usePremiumApi ? '1K+ 专用 API' : 'API')
 
   if (!isAdmin) {
     const hourlyImageLimit = privacyMode ? settings.privacyHourlyImageLimit : settings.hourlyImageLimit
@@ -115,10 +118,13 @@ export default defineEventHandler(async (event) => {
     isAdmin,
     settings,
     apiConfig,
+    usePremiumApi,
     prompt,
     params,
     inputImageDataUrls,
     maskDataUrl,
-    privacyMode,
+    uploadToGallery,
+    dailyPointsTarget: settings.dailyPointsTarget,
+    costPerImage,
   })
 })

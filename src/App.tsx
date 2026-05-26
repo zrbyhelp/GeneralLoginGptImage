@@ -27,6 +27,7 @@ export default function App() {
   const setLocale = useStore((s) => s.setLocale)
   const lastSeenLoginNoticeToken = useStore((s) => s.lastSeenLoginNoticeToken)
   const setLastSeenLoginNoticeToken = useStore((s) => s.setLastSeenLoginNoticeToken)
+  const setUploadToGallery = useStore((s) => s.setUploadToGallery)
   const dismissedAnnouncementIds = useStore((s) => s.dismissedAnnouncementIds)
   const dismissAnnouncement = useStore((s) => s.dismissAnnouncement)
   const [loginNoticeToken, setLoginNoticeToken] = useState<string | null>(null)
@@ -84,7 +85,14 @@ export default function App() {
           authenticated: true,
           isAdmin: Boolean(payload.isAdmin),
           user: payload.user,
+          generationDefaults: payload.generationDefaults ?? {
+            dailyPointsTarget: 100,
+            standardPointCost: 1,
+            premiumPointCost: 300,
+            galleryUploadDefault: false,
+          },
         })
+        setUploadToGallery(Boolean(payload.generationDefaults?.galleryUploadDefault))
       } catch {
         if (!cancelled) {
           setAuth({ loading: false, authenticated: false, isAdmin: false, user: null })
@@ -96,7 +104,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [setAuth])
+  }, [setAuth, setUploadToGallery])
 
   useEffect(() => {
     if (!auth.authenticated) {

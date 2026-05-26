@@ -39,7 +39,8 @@ describe('callImageApi', () => {
       params: { ...DEFAULT_PARAMS, n: 2 },
       inputImageDataUrls: ['data:image/png;base64,input'],
       maskDataUrl: 'data:image/png;base64,mask',
-      privacyMode: true,
+      uploadToGallery: true,
+      usePremiumApi: true,
     })
 
     expect(result).toEqual({
@@ -64,7 +65,9 @@ describe('callImageApi', () => {
       params: { ...DEFAULT_PARAMS, n: 2 },
       inputImageDataUrls: ['data:image/png;base64,input'],
       maskDataUrl: 'data:image/png;base64,mask',
-      privacyMode: true,
+      uploadToGallery: true,
+      usePremiumApi: true,
+      privacyMode: false,
     })
   })
 
@@ -103,7 +106,9 @@ describe('callImageApi', () => {
     expect(body).not.toHaveProperty('apiMode')
     expect(body).not.toHaveProperty('codexCli')
     expect(body.params).not.toHaveProperty('apiKey')
-    expect(body.privacyMode).toBe(false)
+    expect(body.uploadToGallery).toBe(false)
+    expect(body.usePremiumApi).toBe(false)
+    expect(body.privacyMode).toBe(true)
   })
 
   it('returns server generation metadata unchanged', async () => {

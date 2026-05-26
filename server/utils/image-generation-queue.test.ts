@@ -18,10 +18,16 @@ const usageMocks = vi.hoisted(() => ({
 const galleryMocks = vi.hoisted(() => ({
   uploadThirdPartyGalleryContent: vi.fn(),
 }))
+const pointMocks = vi.hoisted(() => ({
+  ensureDailyPointsBalance: vi.fn(),
+  reserveGenerationPoints: vi.fn(),
+  settleGenerationPoints: vi.fn(),
+}))
 
 vi.mock('./server-image-api', () => apiMocks)
 vi.mock('./generation-usage', () => usageMocks)
 vi.mock('./gallery-upload', () => galleryMocks)
+vi.mock('./points', () => pointMocks)
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void
@@ -83,6 +89,11 @@ const adminUser: AppUser = {
 function settings(overrides: Partial<AdminSettings> = {}): AdminSettings {
   return {
     apiConfig,
+    premiumApiConfig: apiConfig,
+    dailyPointsTarget: 100,
+    standardPointCost: 1,
+    premiumPointCost: 300,
+    galleryUploadDefault: false,
     hourlyImageLimit: 20,
     privacyHourlyImageLimit: 5,
     serviceConcurrentImageLimit: 1,
@@ -113,6 +124,22 @@ beforeEach(() => {
   vi.clearAllMocks()
   usageMocks.recordGenerationUsage.mockResolvedValue(null)
   galleryMocks.uploadThirdPartyGalleryContent.mockResolvedValue(undefined)
+  pointMocks.reserveGenerationPoints.mockResolvedValue({
+    balance: 99,
+    lastDailyRefillDate: '2026-05-26',
+    dailyRefilled: false,
+    reservedPoints: 1,
+  })
+  pointMocks.settleGenerationPoints.mockResolvedValue({
+    balance: 98,
+    chargedPoints: 1,
+    refundedPoints: 0,
+  })
+  pointMocks.ensureDailyPointsBalance.mockResolvedValue({
+    balance: 98,
+    lastDailyRefillDate: '2026-05-26',
+    dailyRefilled: false,
+  })
   resetImageGenerationQueueForTests()
 })
 
@@ -131,10 +158,13 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 3 }),
       apiConfig,
+      usePremiumApi: false,
       prompt: 'prompt',
       params: { ...params, n: 2 },
       inputImageDataUrls: [],
-      privacyMode: true,
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      costPerImage: 1,
     })
     await flushPromises()
 
@@ -143,10 +173,13 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 3 }),
       apiConfig,
+      usePremiumApi: false,
       prompt: 'prompt',
       params: { ...params, n: 2 },
       inputImageDataUrls: [],
-      privacyMode: true,
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      costPerImage: 1,
     })).rejects.toMatchObject({
       statusCode: 429,
       statusMessage: '目前最大同时生成张数是 3，请等待生成完成后继续',
@@ -165,20 +198,26 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 5 }),
       apiConfig,
+      usePremiumApi: false,
       prompt: 'first',
       params,
       inputImageDataUrls: [],
-      privacyMode: true,
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      costPerImage: 1,
     })
     const secondJobStatus = await createImageGenerationJob({
       user: otherUser,
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 5 }),
       apiConfig,
+      usePremiumApi: false,
       prompt: 'second',
       params,
       inputImageDataUrls: [],
-      privacyMode: true,
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      costPerImage: 1,
     })
     await flushPromises()
 
@@ -211,10 +250,13 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings(),
       apiConfig,
+      usePremiumApi: false,
       prompt: 'normal',
       params,
       inputImageDataUrls: [],
-      privacyMode: true,
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      costPerImage: 1,
     })
     await flushPromises()
 
@@ -223,10 +265,13 @@ describe('image generation queue', () => {
       isAdmin: true,
       settings: settings({ userConcurrentImageLimit: 1 }),
       apiConfig,
+      usePremiumApi: false,
       prompt: 'admin',
       params: { ...params, n: 2 },
       inputImageDataUrls: [],
-      privacyMode: true,
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      costPerImage: 1,
     })
     await flushPromises()
 

@@ -1,17 +1,55 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useStore, exportData, importData, clearAllData } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const auth = useStore((s) => s.auth)
+  const setAuth = useStore((s) => s.setAuth)
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const showToast = useStore((s) => s.showToast)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const [redeemCode, setRedeemCode] = useState('')
+  const [redeeming, setRedeeming] = useState(false)
 
   const handleClose = () => setShowSettings(false)
   useCloseOnEscape(showSettings, handleClose)
+
+  async function handleRedeemCode() {
+    const code = redeemCode.trim()
+    if (!code) {
+      showToast('请输入兑换码', 'error')
+      return
+    }
+
+    setRedeeming(true)
+    try {
+      const response = await fetch('/api/points/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      })
+      if (!response.ok) throw new Error(await getResponseErrorMessage(response))
+      const payload = await response.json() as { addedPoints?: number; pointsBalance?: number }
+      if (typeof payload.pointsBalance === 'number' && auth.user) {
+        setAuth({
+          user: {
+            ...auth.user,
+            pointsBalance: payload.pointsBalance,
+          },
+        })
+      }
+      showToast(`兑换成功，获得 ${payload.addedPoints ?? 0} 积分`, 'success')
+      setRedeemCode('')
+    } catch (error) {
+      showToast(`兑换失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    } finally {
+      setRedeeming(false)
+    }
+  }
 
   if (!showSettings) return null
 
@@ -19,6 +57,27 @@ export default function SettingsModal() {
     const file = event.target.files?.[0]
     if (file) await importData(file)
     event.target.value = ''
+  }
+
+  async function getResponseErrorMessage(response: Response) {
+    try {
+      const text = await response.text()
+      if (!text.trim()) return `HTTP ${response.status}`
+      try {
+        const payload = JSON.parse(text) as Record<string, unknown>
+        if (typeof payload.statusMessage === 'string') return payload.statusMessage
+        if (typeof payload.message === 'string') return payload.message
+        if (typeof payload.error === 'string') return payload.error
+        if (payload.error && typeof payload.error === 'object') {
+          const errorRecord = payload.error as Record<string, unknown>
+          if (typeof errorRecord.message === 'string') return errorRecord.message
+        }
+      } catch {
+        return text
+      }
+    } catch {
+      return `HTTP ${response.status}`
+    }
   }
 
   return (
@@ -48,6 +107,36 @@ export default function SettingsModal() {
         </div>
 
         <div className="space-y-6">
+          <section className="border-b border-gray-100 pb-6 dark:border-white/[0.08]">
+            <h4 className="mb-4 flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-200">
+              <svg className="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M6 11h12M5 21h14a2 2 0 0 0 2-2V7H3v12a2 2 0 0 0 2 2Z" />
+              </svg>
+              积分兑换
+            </h4>
+            <div className="space-y-3">
+              <div className="rounded-xl border border-gray-200/70 bg-white/70 px-3 py-2 text-xs text-gray-500 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-400">
+                当前积分：{auth.user?.pointsBalance ?? 0}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={redeemCode}
+                  onChange={(event) => setRedeemCode(event.target.value)}
+                  placeholder="输入兑换码"
+                  className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleRedeemCode()}
+                  disabled={redeeming}
+                  className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {redeeming ? '兑换中...' : '兑换'}
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section>
             <h4 className="mb-4 flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-200">
               <svg className="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

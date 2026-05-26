@@ -106,7 +106,9 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       params: opts.params,
       inputImageDataUrls: opts.inputImageDataUrls,
       maskDataUrl: opts.maskDataUrl,
-      privacyMode: Boolean(opts.privacyMode),
+      uploadToGallery: Boolean(opts.uploadToGallery),
+      usePremiumApi: Boolean(opts.usePremiumApi),
+      privacyMode: opts.privacyMode ?? !Boolean(opts.uploadToGallery),
     }),
   })
 

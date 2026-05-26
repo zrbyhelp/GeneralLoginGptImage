@@ -6,6 +6,7 @@ import type { AdminSettings, ServerApiConfig } from './admin-settings'
 import { callServerImageApi, type ServerImageApiResult } from './server-image-api'
 import { recordGenerationUsage } from './generation-usage'
 import { uploadThirdPartyGalleryContent } from './gallery-upload'
+import { ensureDailyPointsBalance, reserveGenerationPoints, settleGenerationPoints } from './points'
 
 type UnitStatus = 'queued' | 'running' | 'done' | 'error'
 export type ImageGenerationJobStatus = 'queued' | 'running' | 'done' | 'error'
@@ -25,11 +26,14 @@ interface ImageGenerationJob {
   isAdmin: boolean
   settings: AdminSettings
   apiConfig: ServerApiConfig
+  usePremiumApi: boolean
   prompt: string
   params: TaskParams
   inputImageDataUrls: string[]
   maskDataUrl?: string
-  privacyMode: boolean
+  uploadToGallery: boolean
+  reservedPoints: number
+  costPerImage: number
   units: ImageGenerationUnit[]
   status: ImageGenerationJobStatus
   error: string | null
@@ -38,6 +42,11 @@ interface ImageGenerationJob {
     apiProfileName: string
     apiModel: string
     privacyMode: boolean
+    uploadToGallery: boolean
+    usePremiumApi: boolean
+    pointsBalance: number
+    chargedPoints: number
+    refundedPoints: number
     galleryUploadError: string | null
   }) | null
   createdAt: number
@@ -64,6 +73,11 @@ export interface PublicImageGenerationJobStatus {
   apiModel?: string
   galleryUploadError?: string | null
   privacyMode?: boolean
+  uploadToGallery?: boolean
+  usePremiumApi?: boolean
+  pointsBalance?: number
+  chargedPoints?: number
+  refundedPoints?: number
 }
 
 const JOB_CLEANUP_MS = 30 * 60 * 1000
@@ -160,6 +174,25 @@ function mergeActualParams(...sources: Array<Partial<TaskParams> | undefined>) {
   return Object.keys(merged).length ? merged as Partial<TaskParams> : undefined
 }
 
+async function settleJobPoints(job: ImageGenerationJob, actualImages: number) {
+  try {
+    return await settleGenerationPoints({
+      userId: job.user.id,
+      reservedPoints: job.reservedPoints,
+      actualImages,
+      costPerImage: job.costPerImage,
+      referenceId: job.id,
+    })
+  } catch {
+    const points = await ensureDailyPointsBalance(job.user.id, job.settings.dailyPointsTarget)
+    return {
+      balance: points.balance,
+      chargedPoints: job.reservedPoints,
+      refundedPoints: 0,
+    }
+  }
+}
+
 async function finishJobIfComplete(job: ImageGenerationJob) {
   if (job.status === 'done' || job.status === 'error') return
   if (job.units.some((unit) => unit.status === 'queued' || unit.status === 'running')) {
@@ -177,8 +210,26 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
 
   job.finishedAt = Date.now()
   if (!successful.length) {
+    const settlement = await settleJobPoints(job, 0)
     job.status = 'error'
     job.error = errors[0] || '生成失败'
+    job.result = {
+      images: [],
+      actualParams: undefined,
+      actualParamsList: undefined,
+      revisedPrompts: undefined,
+      partialError: errors.length ? errors.join('\n') : null,
+      apiProvider: job.apiConfig.provider,
+      apiProfileName: job.usePremiumApi ? '1K+ 专用配置' : '统一配置',
+      apiModel: job.apiConfig.model,
+      privacyMode: !job.uploadToGallery,
+      uploadToGallery: job.uploadToGallery,
+      usePremiumApi: job.usePremiumApi,
+      pointsBalance: settlement.balance,
+      chargedPoints: settlement.chargedPoints,
+      refundedPoints: settlement.refundedPoints,
+      galleryUploadError: null,
+    }
     scheduleCleanup(job)
     return
   }
@@ -192,16 +243,24 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
   )
   const firstActualParams = successful[0]?.result?.actualParams
   let galleryUploadError: string | null = null
+  let pointsBalance = 0
+  let chargedPoints = 0
+  let refundedPoints = 0
 
   if (images.length > 0) {
     await recordGenerationUsage({
       userId: job.user.id,
       imageCount: images.length,
-      privacyMode: job.privacyMode,
+      privacyMode: !job.uploadToGallery,
     })
   }
 
-  if (!job.privacyMode && images.length > 0) {
+  const settlement = await settleJobPoints(job, images.length)
+  pointsBalance = settlement.balance
+  chargedPoints = settlement.chargedPoints
+  refundedPoints = settlement.refundedPoints
+
+  if (job.uploadToGallery && images.length > 0) {
     try {
       await uploadThirdPartyGalleryContent({
         uploadUrl: job.settings.galleryUploadUrl,
@@ -229,9 +288,14 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
     revisedPrompts,
     partialError: errors.length ? errors.join('\n') : null,
     apiProvider: job.apiConfig.provider,
-    apiProfileName: '统一配置',
+    apiProfileName: job.usePremiumApi ? '1K+ 专用配置' : '统一配置',
     apiModel: job.apiConfig.model,
-    privacyMode: job.privacyMode,
+    privacyMode: !job.uploadToGallery,
+    uploadToGallery: job.uploadToGallery,
+    usePremiumApi: job.usePremiumApi,
+    pointsBalance,
+    chargedPoints,
+    refundedPoints,
     galleryUploadError,
   }
   scheduleCleanup(job)
@@ -311,11 +375,14 @@ export async function createImageGenerationJob(input: {
   isAdmin: boolean
   settings: AdminSettings
   apiConfig: ServerApiConfig
+  usePremiumApi: boolean
   prompt: string
   params: TaskParams
   inputImageDataUrls: string[]
   maskDataUrl?: string
-  privacyMode: boolean
+  uploadToGallery: boolean
+  dailyPointsTarget: number
+  costPerImage: number
 }) {
   const totalImages = Math.max(1, Math.floor(Number(input.params.n) || 1))
   serviceConcurrentImageLimit = input.settings.serviceConcurrentImageLimit
@@ -335,17 +402,29 @@ export async function createImageGenerationJob(input: {
     }
   }
 
+  const jobId = generateId('job')
+  const reservation = await reserveGenerationPoints({
+    userId: input.user.id,
+    requestedImages: totalImages,
+    costPerImage: input.costPerImage,
+    dailyTarget: input.dailyPointsTarget,
+    referenceId: jobId,
+  })
+
   const job: ImageGenerationJob = {
-    id: generateId('job'),
+    id: jobId,
     user: input.user,
     isAdmin: input.isAdmin,
     settings: input.settings,
     apiConfig: input.apiConfig,
+    usePremiumApi: input.usePremiumApi,
     prompt: input.prompt,
     params: { ...input.params, n: totalImages },
     inputImageDataUrls: input.inputImageDataUrls,
     maskDataUrl: input.maskDataUrl,
-    privacyMode: input.privacyMode,
+    uploadToGallery: input.uploadToGallery,
+    reservedPoints: reservation.reservedPoints,
+    costPerImage: input.costPerImage,
     units: createUnits(totalImages),
     status: 'queued',
     error: null,
@@ -355,9 +434,14 @@ export async function createImageGenerationJob(input: {
     cleanupTimer: null,
   }
 
-  jobs.set(job.id, job)
-  void scheduleImageGenerationQueue()
-  return serializeImageGenerationJob(job)
+  try {
+    jobs.set(job.id, job)
+    void scheduleImageGenerationQueue()
+    return serializeImageGenerationJob(job)
+  } catch (error) {
+    await settleJobPoints(job, 0)
+    throw error
+  }
 }
 
 export function getImageGenerationJob(jobId: string) {
@@ -379,6 +463,9 @@ export function serializeImageGenerationJob(job: ImageGenerationJob): PublicImag
     runningImages: getRunningUnitCount(job),
     queuedImages: getQueuedUnitCount(job),
     error: job.error,
+    usePremiumApi: job.usePremiumApi,
+    uploadToGallery: job.uploadToGallery,
+    privacyMode: !job.uploadToGallery,
   }
 
   if (job.status === 'done' && job.result) {

@@ -92,7 +92,14 @@ interface AppState {
       name: string | null
       avatarUrl: string | null
       status: string
+      pointsBalance?: number
     } | null
+    generationDefaults: {
+      dailyPointsTarget: number
+      standardPointCost: number
+      premiumPointCost: number
+      galleryUploadDefault: boolean
+    }
   }
   setAuth: (auth: Partial<AppState['auth']>) => void
 
@@ -115,8 +122,10 @@ interface AppState {
   // 输入
   prompt: string
   setPrompt: (p: string) => void
-  privacyMode: boolean
-  setPrivacyMode: (privacyMode: boolean) => void
+  uploadToGallery: boolean
+  setUploadToGallery: (uploadToGallery: boolean) => void
+  usePremiumApi: boolean
+  setUsePremiumApi: (usePremiumApi: boolean) => void
   inputImages: InputImage[]
   addInputImage: (img: InputImage) => void
   removeInputImage: (idx: number) => void
@@ -199,6 +208,12 @@ export const useStore = create<AppState>()(
         authenticated: false,
         isAdmin: false,
         user: null,
+        generationDefaults: {
+          dailyPointsTarget: 100,
+          standardPointCost: 1,
+          premiumPointCost: 300,
+          galleryUploadDefault: false,
+        },
       },
       setAuth: (auth) => set((state) => ({ auth: { ...state.auth, ...auth } })),
 
@@ -227,8 +242,10 @@ export const useStore = create<AppState>()(
       // Input
       prompt: '',
       setPrompt: (prompt) => set({ prompt }),
-      privacyMode: false,
-      setPrivacyMode: (privacyMode) => set({ privacyMode }),
+      uploadToGallery: false,
+      setUploadToGallery: (uploadToGallery) => set({ uploadToGallery }),
+      usePremiumApi: false,
+      setUsePremiumApi: (usePremiumApi) => set({ usePremiumApi }),
       inputImages: [],
       addInputImage: (img) =>
         set((s) => {
@@ -378,6 +395,12 @@ function isTaskInFlight(task: TaskRecord) {
   return task.status === 'queued' || task.status === 'running'
 }
 
+function getTaskUploadToGallery(task: TaskRecord) {
+  if (typeof task.uploadToGallery === 'boolean') return task.uploadToGallery
+  if (typeof task.privacyMode === 'boolean') return !task.privacyMode
+  return false
+}
+
 function isRunningOpenAITask(task: TaskRecord) {
   return isTaskInFlight(task) && !task.queueJobId && isOpenAITask(task)
 }
@@ -401,6 +424,13 @@ function isUserConcurrentLimitError(error: unknown) {
   const record = error.data && typeof error.data === 'object' ? error.data as Record<string, unknown> : {}
   const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
   return data.reason === 'userConcurrentImageLimit' || error.message.includes('目前最大同时生成张数')
+}
+
+function isPointsInsufficientError(error: unknown) {
+  if (!(error instanceof ImageApiError) || error.statusCode !== 429) return false
+  const record = error.data && typeof error.data === 'object' ? error.data as Record<string, unknown> : {}
+  const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {}
+  return data.reason === 'pointsInsufficient' || error.message.includes('积分不足')
 }
 
 export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Date.now()) {
@@ -637,6 +667,12 @@ async function finishTaskWithResult(
     apiProvider: result.apiProvider ?? task.apiProvider,
     apiProfileName: result.apiProfileName ?? task.apiProfileName,
     apiModel: result.apiModel ?? task.apiModel,
+    uploadToGallery: result.uploadToGallery ?? task.uploadToGallery,
+    usePremiumApi: result.usePremiumApi ?? task.usePremiumApi,
+    privacyMode: result.privacyMode ?? task.privacyMode,
+    chargedPoints: result.chargedPoints,
+    refundedPoints: result.refundedPoints,
+    pointsBalance: result.pointsBalance,
     outputImages: outputIds,
     actualParams: shouldStoreApiResponseMetadata ? { ...result.actualParams, n: outputIds.length } : undefined,
     actualParamsByImage: actualParamsByImage && Object.keys(actualParamsByImage).length > 0 ? actualParamsByImage : undefined,
@@ -659,6 +695,18 @@ async function finishTaskWithResult(
     useStore.getState().showToast(`图集上传失败：${result.galleryUploadError}`, 'error')
   }
 
+  if (typeof result.pointsBalance === 'number') {
+    const currentUser = useStore.getState().auth.user
+    if (currentUser) {
+      useStore.getState().setAuth({
+        user: {
+          ...currentUser,
+          pointsBalance: result.pointsBalance,
+        },
+      })
+    }
+  }
+
   const currentMask = useStore.getState().maskDraft
   if (
     maskDataUrl &&
@@ -672,7 +720,7 @@ async function finishTaskWithResult(
 
 /** 提交新任务 */
 export async function submitTask(options: SubmitTaskOptions = {}) {
-  const { settings, prompt, privacyMode, inputImages, maskDraft, params, showToast, setConfirmDialog } =
+  const { auth, settings, prompt, uploadToGallery, usePremiumApi, inputImages, maskDraft, params, showToast, setConfirmDialog } =
     useStore.getState()
 
   if (!prompt.trim()) {
@@ -680,10 +728,20 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     return
   }
 
+  const costPerImage = usePremiumApi
+    ? auth.generationDefaults.premiumPointCost
+    : auth.generationDefaults.standardPointCost
+  const requiredPoints = costPerImage * Math.max(1, Math.floor(Number(params.n) || 1))
+  const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
+  if (pointsBalance != null && pointsBalance < requiredPoints) {
+    showToast(`积分不足，需要 ${requiredPoints} 积分，当前 ${pointsBalance} 积分`, 'error')
+    return
+  }
+
   if (!options.confirmed) {
     setConfirmDialog({
       title: '确认生成图片？',
-      message: '将提交当前提示词和参数生成图片。是否继续？',
+      message: `将提交当前提示词和参数生成图片，预计消耗 ${requiredPoints} 积分。是否继续？`,
       confirmText: '确认生成',
       icon: 'info',
       action: () => {
@@ -742,9 +800,11 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     prompt: prompt.trim(),
     params: normalizedParams,
     apiProvider: 'openai',
-    apiProfileName: '统一配置',
+    apiProfileName: usePremiumApi ? '1K+ 专用配置' : '统一配置',
     apiModel: '服务端模型',
-    privacyMode,
+    uploadToGallery,
+    usePremiumApi,
+    privacyMode: !uploadToGallery,
     inputImageIds: orderedInputImages.map((i) => i.id),
     maskTargetImageId,
     maskImageId,
@@ -811,7 +871,9 @@ async function executeTask(taskId: string) {
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
-      privacyMode: Boolean(task.privacyMode),
+      uploadToGallery: getTaskUploadToGallery(task),
+      usePremiumApi: Boolean(task.usePremiumApi),
+      privacyMode: task.privacyMode ?? !getTaskUploadToGallery(task),
       onFalRequestEnqueued: (request) => {
         falRequestInfo = request
         updateTaskInStore(taskId, {
@@ -831,7 +893,7 @@ async function executeTask(taskId: string) {
   } catch (err) {
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
     if (!isTaskInFlight(latestTask)) return
-    if (isUserConcurrentLimitError(err)) {
+    if (isUserConcurrentLimitError(err) || isPointsInsufficientError(err)) {
       useStore.getState().setTasks(useStore.getState().tasks.filter((item) => item.id !== taskId))
       await dbDeleteTask(taskId)
       useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
@@ -920,19 +982,23 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
     return
   }
 
-  const activeProfile = getActiveApiProfile(settings)
   const normalizedParams = normalizeParamsForSettings(task.params, settings)
+  const uploadToGallery = getTaskUploadToGallery(task)
+  const usePremiumApi = Boolean(task.usePremiumApi)
   const taskId = genId()
   const newTask: TaskRecord = {
     id: taskId,
     prompt: task.prompt,
     params: normalizedParams,
-    apiProvider: activeProfile.provider,
-    apiProfileName: activeProfile.name,
-    apiModel: activeProfile.model,
+    apiProvider: 'openai',
+    apiProfileName: usePremiumApi ? '1K+ 专用配置' : '统一配置',
+    apiModel: '服务端模型',
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,
+    uploadToGallery,
+    usePremiumApi,
+    privacyMode: !uploadToGallery,
     outputImages: [],
     status: 'queued',
     error: null,
@@ -953,9 +1019,11 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
 
 /** 复用配置 */
 export async function reuseConfig(task: TaskRecord) {
-  const { settings, setPrompt, setParams, setInputImages, setMaskDraft, clearMaskDraft, showToast } = useStore.getState()
+  const { settings, setPrompt, setParams, setInputImages, setMaskDraft, clearMaskDraft, setUploadToGallery, setUsePremiumApi, showToast } = useStore.getState()
   setPrompt(task.prompt)
   setParams(normalizeParamsForSettings(task.params, settings))
+  setUploadToGallery(getTaskUploadToGallery(task))
+  setUsePremiumApi(Boolean(task.usePremiumApi))
 
   // 恢复输入图片
   const imgs: InputImage[] = []
@@ -1092,13 +1160,15 @@ export async function clearAllData() {
   await dbClearTasks()
   await clearImages()
   imageCache.clear()
-  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, showToast } = useStore.getState()
+  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, setUploadToGallery, setUsePremiumApi, showToast } = useStore.getState()
   setTasks([])
   clearInputImages()
   useStore.setState({ dismissedCodexCliPrompts: [] })
   clearMaskDraft()
   setSettings({ ...DEFAULT_SETTINGS })
   setParams({ ...DEFAULT_PARAMS })
+  setUploadToGallery(false)
+  setUsePremiumApi(false)
   showToast('所有数据已清空', 'success')
 }
 

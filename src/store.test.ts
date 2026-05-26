@@ -267,6 +267,47 @@ describe('submit task safeguards', () => {
       'error',
     )
   })
+
+  it('keeps the input when the server rejects for insufficient points', async () => {
+    useStore.setState({
+      auth: {
+        loading: false,
+        authenticated: true,
+        isAdmin: false,
+        user: {
+          id: 'user-a',
+          account: 'user-a',
+          email: null,
+          username: null,
+          name: null,
+          avatarUrl: null,
+          status: 'ACTIVE',
+          pointsBalance: 10,
+        },
+        generationDefaults: {
+          dailyPointsTarget: 100,
+          standardPointCost: 1,
+          premiumPointCost: 300,
+          galleryUploadDefault: false,
+        },
+      },
+    })
+    apiMocks.callImageApi.mockRejectedValue(new apiMocks.ImageApiError(
+      '积分不足，无法生成图片',
+      429,
+      { data: { reason: 'pointsInsufficient', balance: 0, required: 1 } },
+    ))
+
+    await submitTask({ confirmed: true })
+    await flushPromises()
+
+    expect(useStore.getState().tasks).toEqual([])
+    expect(useStore.getState().prompt).toBe('prompt')
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(
+      '积分不足，无法生成图片',
+      'error',
+    )
+  })
 })
 
 describe('interrupted OpenAI running tasks', () => {

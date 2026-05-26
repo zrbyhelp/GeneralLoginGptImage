@@ -70,6 +70,17 @@ function initSchema(db: SqliteDatabase) {
       timeout INTEGER NOT NULL,
       api_mode TEXT NOT NULL,
       codex_cli INTEGER NOT NULL,
+      premium_provider TEXT NOT NULL,
+      premium_base_url TEXT NOT NULL,
+      premium_api_key TEXT NOT NULL,
+      premium_model TEXT NOT NULL,
+      premium_timeout INTEGER NOT NULL,
+      premium_api_mode TEXT NOT NULL,
+      premium_codex_cli INTEGER NOT NULL,
+      daily_points_target INTEGER NOT NULL DEFAULT 100,
+      standard_point_cost INTEGER NOT NULL DEFAULT 1,
+      premium_point_cost INTEGER NOT NULL DEFAULT 300,
+      gallery_upload_default INTEGER NOT NULL DEFAULT 0,
       hourly_image_limit INTEGER NOT NULL,
       privacy_hourly_image_limit INTEGER NOT NULL,
       service_concurrent_image_limit INTEGER NOT NULL,
@@ -78,6 +89,40 @@ function initSchema(db: SqliteDatabase) {
       gallery_upload_token TEXT NOT NULL,
       updated_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS user_points (
+      user_id TEXT PRIMARY KEY,
+      balance INTEGER NOT NULL,
+      last_daily_refill_date TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS point_ledger (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      delta INTEGER NOT NULL,
+      balance_after INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      reference_id TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS point_ledger_user_created_at_idx
+      ON point_ledger (user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS redeem_codes (
+      code TEXT PRIMARY KEY,
+      points INTEGER NOT NULL,
+      created_by_user_id TEXT NOT NULL,
+      redeemed_by_user_id TEXT,
+      created_at TEXT NOT NULL,
+      redeemed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS redeem_codes_redeemed_by_idx
+      ON redeem_codes (redeemed_by_user_id);
 
     CREATE TABLE IF NOT EXISTS generation_usage (
       id TEXT PRIMARY KEY,
@@ -157,6 +202,39 @@ function initSchema(db: SqliteDatabase) {
   }
   if (!adminSettingColumns.has('user_concurrent_image_limit')) {
     db.exec('ALTER TABLE admin_settings ADD COLUMN user_concurrent_image_limit INTEGER NOT NULL DEFAULT 3')
+  }
+  if (!adminSettingColumns.has('premium_provider')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN premium_provider TEXT NOT NULL DEFAULT 'openai'")
+  }
+  if (!adminSettingColumns.has('premium_base_url')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN premium_base_url TEXT NOT NULL DEFAULT 'https://api.openai.com/v1'")
+  }
+  if (!adminSettingColumns.has('premium_api_key')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN premium_api_key TEXT NOT NULL DEFAULT ''")
+  }
+  if (!adminSettingColumns.has('premium_model')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN premium_model TEXT NOT NULL DEFAULT 'gpt-image-2'")
+  }
+  if (!adminSettingColumns.has('premium_timeout')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN premium_timeout INTEGER NOT NULL DEFAULT 600')
+  }
+  if (!adminSettingColumns.has('premium_api_mode')) {
+    db.exec("ALTER TABLE admin_settings ADD COLUMN premium_api_mode TEXT NOT NULL DEFAULT 'images'")
+  }
+  if (!adminSettingColumns.has('premium_codex_cli')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN premium_codex_cli INTEGER NOT NULL DEFAULT 0')
+  }
+  if (!adminSettingColumns.has('daily_points_target')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN daily_points_target INTEGER NOT NULL DEFAULT 100')
+  }
+  if (!adminSettingColumns.has('standard_point_cost')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN standard_point_cost INTEGER NOT NULL DEFAULT 1')
+  }
+  if (!adminSettingColumns.has('premium_point_cost')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN premium_point_cost INTEGER NOT NULL DEFAULT 300')
+  }
+  if (!adminSettingColumns.has('gallery_upload_default')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN gallery_upload_default INTEGER NOT NULL DEFAULT 0')
   }
   if (!adminSettingColumns.has('gallery_upload_url')) {
     db.exec("ALTER TABLE admin_settings ADD COLUMN gallery_upload_url TEXT NOT NULL DEFAULT 'https://imglist.zrbyhelp.com/api/uploads/third-party'")

@@ -93,8 +93,18 @@ export interface TaskRecord {
   queueCompletedImages?: number
   /** 服务端队列总图片单元数 */
   queueTotalImages?: number
-  /** 是否跳过第三方图集上传 */
+  /** 是否上传第三方图集 */
+  uploadToGallery?: boolean
+  /** 是否使用 1K+ 专用 API 和高档位积分 */
+  usePremiumApi?: boolean
+  /** 旧字段：true 表示跳过第三方图集上传 */
   privacyMode?: boolean
+  /** 本次实际扣除积分 */
+  chargedPoints?: number
+  /** 本次失败图片退款积分 */
+  refundedPoints?: number
+  /** 结算后的最新积分余额 */
+  pointsBalance?: number
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */

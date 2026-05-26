@@ -15,6 +15,19 @@ type AdminSettings = {
     apiMode: ApiMode
     codexCli: boolean
   }
+  premiumApiConfig: {
+    provider: ApiProvider
+    baseUrl: string
+    apiKey: string
+    model: string
+    timeout: number
+    apiMode: ApiMode
+    codexCli: boolean
+  }
+  dailyPointsTarget: number
+  standardPointCost: number
+  premiumPointCost: number
+  galleryUploadDefault: boolean
   hourlyImageLimit: number
   privacyHourlyImageLimit: number
   serviceConcurrentImageLimit: number
@@ -34,6 +47,19 @@ const DEFAULT_SETTINGS: AdminSettings = {
     apiMode: 'images',
     codexCli: false,
   },
+  premiumApiConfig: {
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'gpt-image-2',
+    timeout: 600,
+    apiMode: 'images',
+    codexCli: false,
+  },
+  dailyPointsTarget: 100,
+  standardPointCost: 1,
+  premiumPointCost: 300,
+  galleryUploadDefault: false,
   hourlyImageLimit: 20,
   privacyHourlyImageLimit: 5,
   serviceConcurrentImageLimit: 3,
@@ -49,6 +75,9 @@ export default function AdminAuditModal() {
   const showToast = useStore((s) => s.showToast)
   const [settings, setSettings] = useState<AdminSettings>(DEFAULT_SETTINGS)
   const [saving, setSaving] = useState(false)
+  const [redeemCount, setRedeemCount] = useState(10)
+  const [redeemPoints, setRedeemPoints] = useState(100)
+  const [redeemLoading, setRedeemLoading] = useState(false)
 
   useCloseOnEscape(showAdminAudit, () => setShowAdminAudit(false))
 
@@ -56,6 +85,27 @@ export default function AdminAuditModal() {
     if (!showAdminAudit) return
     void loadSettings()
   }, [showAdminAudit])
+
+  async function getResponseErrorMessage(response: Response) {
+    try {
+      const text = await response.text()
+      if (!text.trim()) return `HTTP ${response.status}`
+      try {
+        const payload = JSON.parse(text) as Record<string, unknown>
+        if (typeof payload.statusMessage === 'string') return payload.statusMessage
+        if (typeof payload.message === 'string') return payload.message
+        if (typeof payload.error === 'string') return payload.error
+        if (payload.error && typeof payload.error === 'object') {
+          const errorRecord = payload.error as Record<string, unknown>
+          if (typeof errorRecord.message === 'string') return errorRecord.message
+        }
+      } catch {
+        return text
+      }
+    } catch {
+      return `HTTP ${response.status}`
+    }
+  }
 
   async function loadSettings() {
     const response = await fetch('/api/admin/settings', { cache: 'no-store' })
@@ -74,13 +124,41 @@ export default function AdminAuditModal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       })
-      if (!response.ok) throw new Error(await response.text())
+      if (!response.ok) throw new Error(await getResponseErrorMessage(response))
       setSettings(await response.json())
       showToast('管理员设置已保存', 'success')
     } catch (error) {
       showToast(`保存失败：${error instanceof Error ? error.message : String(error)}`, 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function issueRedeemCodes() {
+    setRedeemLoading(true)
+    try {
+      const response = await fetch('/api/admin/redeem-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          count: redeemCount,
+          pointsPerCode: redeemPoints,
+        }),
+      })
+      if (!response.ok) throw new Error(await getResponseErrorMessage(response))
+      const text = await response.text()
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `redeem-codes-${redeemCount}x${redeemPoints}.txt`
+      a.click()
+      URL.revokeObjectURL(url)
+      showToast('兑换码已生成', 'success')
+    } catch (error) {
+      showToast(`兑换码发放失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    } finally {
+      setRedeemLoading(false)
     }
   }
 
@@ -136,7 +214,7 @@ export default function AdminAuditModal() {
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每小时每用户最多隐私图片数</span>
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">关闭图集上传时每小时最多生成图片数</span>
               <input
                 value={settings.privacyHourlyImageLimit}
                 onChange={(event) => setSettings((prev) => ({ ...prev, privacyHourlyImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
@@ -168,6 +246,49 @@ export default function AdminAuditModal() {
                 className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
               />
             </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每日补满积分</span>
+              <input
+                value={settings.dailyPointsTarget}
+                onChange={(event) => setSettings((prev) => ({ ...prev, dailyPointsTarget: Math.max(1, Number(event.target.value) || 100) }))}
+                min={1}
+                max={1000000}
+                type="number"
+                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">1K 档单张消耗</span>
+              <input
+                value={settings.standardPointCost}
+                onChange={(event) => setSettings((prev) => ({ ...prev, standardPointCost: Math.max(1, Number(event.target.value) || 1) }))}
+                min={1}
+                max={1000000}
+                type="number"
+                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">1K+ 档单张消耗</span>
+              <input
+                value={settings.premiumPointCost}
+                onChange={(event) => setSettings((prev) => ({ ...prev, premiumPointCost: Math.max(1, Number(event.target.value) || 300) }))}
+                min={1}
+                max={1000000}
+                type="number"
+                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+              />
+            </label>
+            <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/70 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+              <span className="text-sm text-gray-600 dark:text-gray-300">默认上传图集</span>
+              <button
+                type="button"
+                onClick={() => setSettings((prev) => ({ ...prev, galleryUploadDefault: !prev.galleryUploadDefault }))}
+                className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${settings.galleryUploadDefault ? 'bg-blue-500' : 'bg-gray-300'}`}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${settings.galleryUploadDefault ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
             {settings.apiConfig.provider === 'openai' && (
               <label className="block sm:col-span-2">
                 <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
@@ -219,6 +340,117 @@ export default function AdminAuditModal() {
                 className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
               />
             </label>
+            <div className="sm:col-span-2 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">1K+ 专用 API</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">开启后按高档位消耗积分</span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务商类型</span>
+                  <select
+                    value={settings.premiumApiConfig.provider}
+                    onChange={(event) => setSettings((prev) => ({
+                      ...prev,
+                      premiumApiConfig: {
+                        ...prev.premiumApiConfig,
+                        provider: event.target.value as ApiProvider,
+                        apiMode: event.target.value === 'fal' ? 'images' : prev.premiumApiConfig.apiMode,
+                        codexCli: event.target.value === 'openai' ? prev.premiumApiConfig.codexCli : false,
+                      },
+                    }))}
+                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                  >
+                    <option value="openai">OpenAI 兼容接口</option>
+                    <option value="fal">fal.ai</option>
+                  </select>
+                </label>
+                {settings.premiumApiConfig.provider === 'openai' && (
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
+                    <input
+                      value={settings.premiumApiConfig.baseUrl}
+                      onChange={(event) => setSettings((prev) => ({
+                        ...prev,
+                        premiumApiConfig: { ...prev.premiumApiConfig, baseUrl: event.target.value },
+                      }))}
+                      className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                    />
+                  </label>
+                )}
+                <label className="block">
+                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API Key</span>
+                  <input
+                    value={settings.premiumApiConfig.apiKey}
+                    onChange={(event) => setSettings((prev) => ({
+                      ...prev,
+                      premiumApiConfig: { ...prev.premiumApiConfig, apiKey: event.target.value },
+                    }))}
+                    type="password"
+                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">模型 ID</span>
+                  <input
+                    value={settings.premiumApiConfig.model}
+                    onChange={(event) => setSettings((prev) => ({
+                      ...prev,
+                      premiumApiConfig: { ...prev.premiumApiConfig, model: event.target.value },
+                    }))}
+                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                  />
+                </label>
+                {settings.premiumApiConfig.provider === 'openai' && (
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API 接口</span>
+                    <select
+                      value={settings.premiumApiConfig.apiMode}
+                      onChange={(event) => setSettings((prev) => ({
+                        ...prev,
+                        premiumApiConfig: { ...prev.premiumApiConfig, apiMode: event.target.value as ApiMode },
+                      }))}
+                      className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                    >
+                      <option value="images">Images API</option>
+                      <option value="responses">Responses API</option>
+                    </select>
+                  </label>
+                )}
+                <label className="block">
+                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">请求超时 (秒)</span>
+                  <input
+                    value={settings.premiumApiConfig.timeout}
+                    onChange={(event) => setSettings((prev) => ({
+                      ...prev,
+                      premiumApiConfig: { ...prev.premiumApiConfig, timeout: Math.max(10, Number(event.target.value) || 600) },
+                    }))}
+                    min={10}
+                    max={3600}
+                    type="number"
+                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                  />
+                </label>
+                {settings.premiumApiConfig.provider === 'openai' && (
+                  <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/70 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Codex CLI 兼容模式</span>
+                    <button
+                      type="button"
+                      onClick={() => setSettings((prev) => ({
+                        ...prev,
+                        premiumApiConfig: {
+                          ...prev.premiumApiConfig,
+                          codexCli: !prev.premiumApiConfig.codexCli,
+                        },
+                      }))}
+                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${settings.premiumApiConfig.codexCli ? 'bg-blue-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${settings.premiumApiConfig.codexCli ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
             <label className="block sm:col-span-2">
               <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">图集上传 URL</span>
               <input
@@ -249,6 +481,48 @@ export default function AdminAuditModal() {
               </div>
             )}
           </div>
+          <section className="mt-6 border-t border-gray-100 pt-5 dark:border-white/[0.08]">
+            <h4 className="mb-4 flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-200">
+              <svg className="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h10" />
+              </svg>
+              兑换码发放
+            </h4>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">发放数量</span>
+                <input
+                  value={redeemCount}
+                  onChange={(event) => setRedeemCount(Math.max(1, Number(event.target.value) || 1))}
+                  min={1}
+                  max={1000}
+                  type="number"
+                  className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每个可兑换积分</span>
+                <input
+                  value={redeemPoints}
+                  onChange={(event) => setRedeemPoints(Math.max(1, Number(event.target.value) || 1))}
+                  min={1}
+                  max={1000000}
+                  type="number"
+                  className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => void issueRedeemCodes()}
+                disabled={redeemLoading}
+                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50"
+              >
+                {redeemLoading ? '生成中...' : '生成并下载 TXT'}
+              </button>
+            </div>
+          </section>
           <div className="mt-5 flex justify-end">
             <button
               disabled={saving}

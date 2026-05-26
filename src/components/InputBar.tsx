@@ -35,8 +35,11 @@ function useIsMobile() {
 export default function InputBar() {
   const prompt = useStore((s) => s.prompt)
   const setPrompt = useStore((s) => s.setPrompt)
-  const privacyMode = useStore((s) => s.privacyMode)
-  const setPrivacyMode = useStore((s) => s.setPrivacyMode)
+  const auth = useStore((s) => s.auth)
+  const uploadToGallery = useStore((s) => s.uploadToGallery)
+  const setUploadToGallery = useStore((s) => s.setUploadToGallery)
+  const usePremiumApi = useStore((s) => s.usePremiumApi)
+  const setUsePremiumApi = useStore((s) => s.setUsePremiumApi)
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
@@ -154,13 +157,24 @@ export default function InputBar() {
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
 
-  const canSubmit = Boolean(prompt.trim())
   const activeProfile = getActiveApiProfile(settings)
   const activeProvider = activeProfile.provider
   const isFalProvider = activeProvider === 'fal'
   const moderationDisabled = settings.apiMode === 'responses' || isFalProvider
   const compressionDisabled = params.output_format === 'png' || isFalProvider
   const outputImageLimit = getOutputImageLimitForSettings(settings)
+  const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
+  const standardPointCost = auth.generationDefaults.standardPointCost
+  const premiumPointCost = auth.generationDefaults.premiumPointCost
+  const currentPointCost = usePremiumApi ? premiumPointCost : standardPointCost
+  const currentTotalPointCost = currentPointCost * Math.max(1, params.n || 1)
+  const hasInsufficientPoints = pointsBalance != null && pointsBalance < currentTotalPointCost
+  const canSubmit = Boolean(prompt.trim()) && !hasInsufficientPoints
+  const submitTitle = !prompt.trim()
+    ? '请输入提示词'
+    : hasInsufficientPoints
+      ? `积分不足，需要 ${currentTotalPointCost} 积分`
+      : maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)'
   const nLimitHintText = isFalProvider
     ? `fal.ai 最大请求数量为 ${outputImageLimit}`
     : `OpenAI 最大请求数量为 ${outputImageLimit}`
@@ -1226,30 +1240,45 @@ export default function InputBar() {
             className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
           />
 
-          <div className="mt-2 flex items-center justify-between gap-3 px-1">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1">
             <button
               type="button"
-              onClick={() => setPrivacyMode(!privacyMode)}
+              onClick={() => setUploadToGallery(!uploadToGallery)}
               className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-gray-500 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-white/[0.06]"
-              title="隐私模式"
-              aria-label="隐私模式"
-              aria-pressed={privacyMode}
+              title="是否上传图集"
+              aria-label="是否上传图集"
+              aria-pressed={uploadToGallery}
             >
-              <svg className={`h-4 w-4 ${privacyMode ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                <rect x="3" y="11" width="18" height="10" rx="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              <svg className={`h-4 w-4 ${uploadToGallery ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="m7 10 5-5 5 5" />
+                <path d="M12 5v12" />
               </svg>
-              <span className={privacyMode ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>隐私模式</span>
+              <span className={uploadToGallery ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>
+                {uploadToGallery ? '上传图集' : '不上传图集'}
+              </span>
+              <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${uploadToGallery ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.16]'}`}>
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${uploadToGallery ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </span>
             </button>
             <button
               type="button"
-              onClick={() => setPrivacyMode(!privacyMode)}
-              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${privacyMode ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.16]'}`}
-              title="隐私模式"
-              aria-label="切换隐私模式"
-              aria-pressed={privacyMode}
+              onClick={() => setUsePremiumApi(!usePremiumApi)}
+              className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-gray-500 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+              title={`1K+ 专用 API，本次约消耗 ${currentTotalPointCost} 积分`}
+              aria-label="切换 1K+ 专用 API"
+              aria-pressed={usePremiumApi}
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${privacyMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              <svg className={`h-4 w-4 ${usePremiumApi ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+              </svg>
+              <span className={usePremiumApi ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>1K+ 专用 API</span>
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${usePremiumApi ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'}`}>
+                {currentPointCost}/张
+              </span>
+              <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${usePremiumApi ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.16]'}`}>
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${usePremiumApi ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </span>
             </button>
           </div>
 
@@ -1291,7 +1320,7 @@ export default function InputBar() {
                     className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
                       'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
-                    title={maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)'}
+                    title={submitTitle}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
@@ -1346,7 +1375,7 @@ export default function InputBar() {
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                     </svg>
-                    {maskDraft ? '遮罩编辑' : '生成图像'}
+                    {!prompt.trim() ? '请输入提示词' : hasInsufficientPoints ? '积分不足' : maskDraft ? '遮罩编辑' : '生成图像'}
                   </button>
                 </div>
               </div>
