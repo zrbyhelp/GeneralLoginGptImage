@@ -269,7 +269,7 @@ export default function AdminAuditModal() {
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">1K+ 档单张消耗</span>
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">2K-4K 档单张消耗</span>
               <input
                 value={settings.premiumPointCost}
                 onChange={(event) => setSettings((prev) => ({ ...prev, premiumPointCost: Math.max(1, Number(event.target.value) || 300) }))}
@@ -342,7 +342,7 @@ export default function AdminAuditModal() {
             </label>
             <div className="sm:col-span-2 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">1K+ 专用 API</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">2K-4K 专用 API</span>
                 <span className="text-xs text-gray-400 dark:text-gray-500">开启后按高档位消耗积分</span>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">

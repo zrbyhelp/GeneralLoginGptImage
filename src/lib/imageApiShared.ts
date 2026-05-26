@@ -47,7 +47,7 @@ export interface CallApiResult {
   privacyMode?: boolean
   /** 服务端确认的图集上传状态 */
   uploadToGallery?: boolean
-  /** 是否使用 1K+ 专用 API */
+  /** 是否使用 2K-4K 专用 API */
   usePremiumApi?: boolean
   /** 实际扣除的积分 */
   chargedPoints?: number

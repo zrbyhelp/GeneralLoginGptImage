@@ -17,9 +17,22 @@ export default function LoginNoticeModal({ onAcknowledge }: Props) {
           </svg>
           <h3>提示</h3>
         </div>
-        <p className="text-sm leading-6 text-gray-600 dark:text-gray-300">
-          目前服务器资源有限，生成记录和图片资源会优先保存在当前浏览器中。切换账号不会改变本机已有内容；如果需要为不同账号隔离数据，建议使用不同的浏览器用户配置或独立浏览器。
-        </p>
+        <div className="space-y-2 text-sm leading-6 text-gray-600 dark:text-gray-300">
+          <p>
+            目前每日会自动补满至 100 积分，平台已完全开放使用，无需申请。
+          </p>
+          <p>
+            如需生成 4K 图片或更高频生成，可前往商店购买卡密补充积分：5 元可兑换 50000 积分。
+            <a
+              href="https://pay.ldxp.cn/shop/QEJABMGR"
+              target="_blank"
+              rel="noreferrer"
+              className="ml-1 font-medium text-blue-600 underline underline-offset-2 transition hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+            >
+              前往商店购买卡密
+            </a>
+          </p>
+        </div>
         <div className="mt-6 flex justify-end">
           <button
             type="button"

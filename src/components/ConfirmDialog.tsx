@@ -3,12 +3,28 @@ import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
 function renderMessage(message: string) {
-  return message.split(/(`[^`]+`)/g).map((part, index) => {
+  const urlPattern = /^https?:\/\/[^\s`]+$/
+
+  return message.split(/(`[^`]+`|https?:\/\/[^\s`]+)/g).map((part, index) => {
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <code key={index} className="rounded bg-gray-100 px-1 py-0.5 text-[0.85em] text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
           {part.slice(1, -1)}
         </code>
+      )
+    }
+
+    if (urlPattern.test(part)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noreferrer"
+          className="text-blue-600 underline underline-offset-2 dark:text-blue-300"
+        >
+          {part}
+        </a>
       )
     }
 

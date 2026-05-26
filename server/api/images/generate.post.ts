@@ -98,7 +98,7 @@ export default defineEventHandler(async (event) => {
   const apiConfig = usePremiumApi ? settings.premiumApiConfig : settings.apiConfig
   const params = normalizeParams(body.params, apiConfig.provider)
   const costPerImage = usePremiumApi ? settings.premiumPointCost : settings.standardPointCost
-  assertApiConfigUsable(apiConfig, usePremiumApi ? '1K+ 专用 API' : 'API')
+  assertApiConfigUsable(apiConfig, usePremiumApi ? '2K-4K 专用 API' : 'API')
 
   if (!isAdmin) {
     const hourlyImageLimit = privacyMode ? settings.privacyHourlyImageLimit : settings.hourlyImageLimit

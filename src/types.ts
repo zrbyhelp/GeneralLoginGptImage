@@ -95,7 +95,7 @@ export interface TaskRecord {
   queueTotalImages?: number
   /** 是否上传第三方图集 */
   uploadToGallery?: boolean
-  /** 是否使用 1K+ 专用 API 和高档位积分 */
+  /** 是否使用 2K-4K 专用 API 和高档位积分 */
   usePremiumApi?: boolean
   /** 旧字段：true 表示跳过第三方图集上传 */
   privacyMode?: boolean

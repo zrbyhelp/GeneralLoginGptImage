@@ -169,11 +169,11 @@ export default function InputBar() {
   const currentPointCost = usePremiumApi ? premiumPointCost : standardPointCost
   const currentTotalPointCost = currentPointCost * Math.max(1, params.n || 1)
   const hasInsufficientPoints = pointsBalance != null && pointsBalance < currentTotalPointCost
-  const canSubmit = Boolean(prompt.trim()) && !hasInsufficientPoints
+  const canSubmit = Boolean(prompt.trim())
   const submitTitle = !prompt.trim()
     ? '请输入提示词'
     : hasInsufficientPoints
-      ? `积分不足，需要 ${currentTotalPointCost} 积分`
+      ? '积分不足，点击查看补充方式'
       : maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)'
   const nLimitHintText = isFalProvider
     ? `fal.ai 最大请求数量为 ${outputImageLimit}`
@@ -1265,14 +1265,14 @@ export default function InputBar() {
               type="button"
               onClick={() => setUsePremiumApi(!usePremiumApi)}
               className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-gray-500 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-white/[0.06]"
-              title={`1K+ 专用 API，本次约消耗 ${currentTotalPointCost} 积分`}
-              aria-label="切换 1K+ 专用 API"
+              title={`2K-4K 专用 API，本次约消耗 ${currentTotalPointCost} 积分`}
+              aria-label="切换 2K-4K 专用 API"
               aria-pressed={usePremiumApi}
             >
               <svg className={`h-4 w-4 ${usePremiumApi ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                 <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
               </svg>
-              <span className={usePremiumApi ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>1K+ 专用 API</span>
+              <span className={usePremiumApi ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>2K-4K 专用 API</span>
               <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${usePremiumApi ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'}`}>
                 {currentPointCost}/张
               </span>

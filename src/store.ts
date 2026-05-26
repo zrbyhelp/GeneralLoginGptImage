@@ -37,6 +37,7 @@ import { getInitialDisplayPreferences, type AppLocale, type AppTheme } from './l
 
 const imageCache = new Map<string, string>()
 const FAL_RECOVERY_POLL_MS = 10_000
+const POINTS_SHOP_URL = 'https://pay.ldxp.cn/shop/QEJABMGR'
 const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const OPENAI_INTERRUPTED_ERROR = '请求中断'
 
@@ -734,7 +735,18 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
   const requiredPoints = costPerImage * Math.max(1, Math.floor(Number(params.n) || 1))
   const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
   if (pointsBalance != null && pointsBalance < requiredPoints) {
-    showToast(`积分不足，需要 ${requiredPoints} 积分，当前 ${pointsBalance} 积分`, 'error')
+    setConfirmDialog({
+      title: '积分不足',
+      message: `本次生成需要 ${requiredPoints} 积分，当前仅剩 ${pointsBalance} 积分。\n积分会在每天自动补满至 100，也可以前往商店购买卡密补充积分：5 元可兑换 50000 积分。\n${POINTS_SHOP_URL}`,
+      confirmText: '前往商店',
+      icon: 'info',
+      tone: 'warning',
+      action: () => {
+        if (typeof window !== 'undefined') {
+          window.open(POINTS_SHOP_URL, '_blank', 'noopener,noreferrer')
+        }
+      },
+    })
     return
   }
 
@@ -800,7 +812,7 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     prompt: prompt.trim(),
     params: normalizedParams,
     apiProvider: 'openai',
-    apiProfileName: usePremiumApi ? '1K+ 专用配置' : '统一配置',
+    apiProfileName: usePremiumApi ? '2K-4K 专用配置' : '统一配置',
     apiModel: '服务端模型',
     uploadToGallery,
     usePremiumApi,
@@ -991,7 +1003,7 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
     prompt: task.prompt,
     params: normalizedParams,
     apiProvider: 'openai',
-    apiProfileName: usePremiumApi ? '1K+ 专用配置' : '统一配置',
+    apiProfileName: usePremiumApi ? '2K-4K 专用配置' : '统一配置',
     apiModel: '服务端模型',
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,

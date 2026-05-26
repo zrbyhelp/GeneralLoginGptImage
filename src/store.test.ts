@@ -81,6 +81,26 @@ describe('mask draft lifecycle in store actions', () => {
     dbMocks.getImage.mockResolvedValue(undefined)
     apiMocks.callImageApi.mockResolvedValue({ images: [] })
     useStore.setState({
+      auth: {
+        loading: false,
+        authenticated: true,
+        isAdmin: false,
+        user: {
+          id: 'user-a',
+          account: 'user-a',
+          email: null,
+          username: null,
+          name: null,
+          avatarUrl: null,
+          status: 'ACTIVE',
+        },
+        generationDefaults: {
+          dailyPointsTarget: 100,
+          standardPointCost: 1,
+          premiumPointCost: 300,
+          galleryUploadDefault: false,
+        },
+      },
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
       prompt: 'prompt',
       inputImages: [],
@@ -144,6 +164,26 @@ describe('submit task safeguards', () => {
     dbMocks.getImage.mockResolvedValue(undefined)
     apiMocks.callImageApi.mockResolvedValue({ images: [] })
     useStore.setState({
+      auth: {
+        loading: false,
+        authenticated: true,
+        isAdmin: false,
+        user: {
+          id: 'user-a',
+          account: 'user-a',
+          email: null,
+          username: null,
+          name: null,
+          avatarUrl: null,
+          status: 'ACTIVE',
+        },
+        generationDefaults: {
+          dailyPointsTarget: 100,
+          standardPointCost: 1,
+          premiumPointCost: 300,
+          galleryUploadDefault: false,
+        },
+      },
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
       prompt: 'prompt',
       inputImages: [],
@@ -190,6 +230,41 @@ describe('submit task safeguards', () => {
       status: 'queued',
     }))
     expect(useStore.getState().prompt).toBe('')
+  })
+
+  it('opens the points guidance dialog when balance is insufficient', async () => {
+    useStore.setState({
+      auth: {
+        loading: false,
+        authenticated: true,
+        isAdmin: false,
+        user: {
+          id: 'user-a',
+          account: 'user-a',
+          email: null,
+          username: null,
+          name: null,
+          avatarUrl: null,
+          status: 'ACTIVE',
+          pointsBalance: 0,
+        },
+        generationDefaults: {
+          dailyPointsTarget: 100,
+          standardPointCost: 1,
+          premiumPointCost: 300,
+          galleryUploadDefault: false,
+        },
+      },
+    })
+
+    await submitTask()
+
+    expect(dbMocks.putTask).not.toHaveBeenCalled()
+    expect(useStore.getState().setConfirmDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '积分不足',
+      confirmText: '前往商店',
+      message: expect.stringContaining('https://pay.ldxp.cn/shop/QEJABMGR'),
+    }))
   })
 
   it('keeps successful output images and partial errors on a partially failed generation', async () => {
