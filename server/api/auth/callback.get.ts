@@ -31,13 +31,19 @@ export default defineEventHandler(async (event) => {
   const code = typeof query.code === 'string' ? query.code : ''
   const state = typeof query.state === 'string' ? query.state : ''
   const expectedState = getCookie(event, STATE_COOKIE)
-  const returnTo = normalizeReturnTo(getCookie(event, RETURN_COOKIE))
+  const storedReturnTo = normalizeReturnTo(getCookie(event, RETURN_COOKIE))
+  const hasMatchingState = Boolean(expectedState && state && state === expectedState)
+  const returnTo = hasMatchingState ? storedReturnTo : '/'
 
   deleteCookie(event, STATE_COOKIE, { path: '/' })
   deleteCookie(event, RETURN_COOKIE, { path: '/' })
 
-  if (!code || !state || (expectedState && state !== expectedState)) {
+  if (!code) {
     return sendRedirect(event, `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`, 302)
+  }
+
+  if (expectedState && state && state !== expectedState) {
+    console.warn('统一登录回调 state 与本地登录 state 不一致，按门户直接跳转处理。')
   }
 
   const config = useRuntimeConfig()
