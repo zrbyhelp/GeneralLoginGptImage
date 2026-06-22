@@ -35,7 +35,7 @@ export default function App() {
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
-    const blockedQueryKeys = ['apiUrl', 'apiKey', 'codexCli', 'apiMode', 'provider']
+    const blockedQueryKeys = ['apiUrl', 'apiKey', 'codexCli', 'apiMode', 'provider', 'modelId']
     let removedApiQuery = false
     for (const key of blockedQueryKeys) {
       if (searchParams.has(key)) {
@@ -88,8 +88,9 @@ export default function App() {
           generationDefaults: payload.generationDefaults ?? {
             dailyPointsTarget: 100,
             standardPointCost: 1,
-            premiumPointCost: 300,
             galleryUploadDefault: false,
+            models: [],
+            defaultModelId: '',
           },
         })
         setUploadToGallery(Boolean(payload.generationDefaults?.galleryUploadDefault))

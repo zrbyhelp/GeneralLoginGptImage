@@ -2,6 +2,11 @@ import { useMemo, useRef, useState, useEffect } from 'react'
 import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
 import TaskCard from './TaskCard'
 
+const CARD_HEIGHT = 162
+const GRID_GAP = 16
+const ROW_HEIGHT = CARD_HEIGHT + GRID_GAP
+const OVERSCAN_ROWS = 3
+
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
   const searchQuery = useStore((s) => s.searchQuery)
@@ -23,6 +28,7 @@ export default function TaskGrid() {
   const startedWithCtrl = useRef(false)
   const initialSelection = useRef<string[]>([])
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+  const [viewport, setViewport] = useState({ scrollY: window.scrollY, height: window.innerHeight, width: window.innerWidth })
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
@@ -39,6 +45,34 @@ export default function TaskGrid() {
       return prompt.includes(q) || paramStr.includes(q)
     })
   }, [tasks, searchQuery, filterStatus, filterFavorite])
+
+  const columnCount = useMemo(() => {
+    if (viewport.width >= 1024) return 3
+    if (viewport.width >= 640) return 2
+    return 1
+  }, [viewport.width])
+
+  const virtualWindow = useMemo(() => {
+    const rootTop = rootRef.current?.getBoundingClientRect().top ?? 0
+    const absoluteTop = rootTop + viewport.scrollY
+    const relativeTop = Math.max(0, viewport.scrollY - absoluteTop)
+    const firstRow = Math.max(0, Math.floor(relativeTop / ROW_HEIGHT) - OVERSCAN_ROWS)
+    const visibleRows = Math.ceil(viewport.height / ROW_HEIGHT) + OVERSCAN_ROWS * 2
+    const totalRows = Math.ceil(filteredTasks.length / columnCount)
+    const startIndex = firstRow * columnCount
+    const endIndex = Math.min(filteredTasks.length, (firstRow + visibleRows) * columnCount)
+    return {
+      startIndex,
+      endIndex,
+      topPadding: firstRow * ROW_HEIGHT,
+      bottomPadding: Math.max(0, (totalRows - firstRow - visibleRows) * ROW_HEIGHT),
+    }
+  }, [columnCount, filteredTasks.length, viewport])
+
+  const visibleTasks = useMemo(
+    () => filteredTasks.slice(virtualWindow.startIndex, virtualWindow.endIndex),
+    [filteredTasks, virtualWindow.endIndex, virtualWindow.startIndex],
+  )
 
   const handleDelete = (task: typeof tasks[0]) => {
     setConfirmDialog({
@@ -165,6 +199,29 @@ export default function TaskGrid() {
     }
   }, [clearSelection, isMac])
 
+  useEffect(() => {
+    let frame = 0
+    const updateViewport = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        setViewport({
+          scrollY: window.scrollY,
+          height: window.innerHeight,
+          width: window.innerWidth,
+        })
+      })
+    }
+    window.addEventListener('scroll', updateViewport, { passive: true })
+    window.addEventListener('resize', updateViewport)
+    updateViewport()
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', updateViewport)
+      window.removeEventListener('resize', updateViewport)
+    }
+  }, [])
+
   if (!filteredTasks.length) {
     return (
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
@@ -198,8 +255,9 @@ export default function TaskGrid() {
       data-task-grid-root
       className="relative min-h-[50vh]"
     >
-      <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-        {filteredTasks.map((task) => (
+      <div style={{ height: virtualWindow.topPadding }} />
+      <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {visibleTasks.map((task) => (
           <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
             <TaskCard
               task={task}
@@ -227,6 +285,7 @@ export default function TaskGrid() {
           </div>
         ))}
       </div>
+      <div style={{ height: virtualWindow.bottomPadding + 40 }} />
       {selectionBox && (
         <div
           className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"

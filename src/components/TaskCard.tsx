@@ -13,6 +13,8 @@ interface Props {
   isSelected?: boolean
 }
 
+const imageMetaCache = new Map<string, { ratio: string; size: string }>()
+
 export default function TaskCard({
   task,
   onReuse,
@@ -113,40 +115,64 @@ export default function TaskCard({
   useEffect(() => {
     setCoverRatio('')
     setCoverSize('')
+    setThumbSrc('')
 
     if (task.outputImages?.[0]) {
-      const cached = getCachedImage(task.outputImages[0])
+      let cancelled = false
+      const imageId = task.outputImages[0]
+      const cached = getCachedImage(imageId)
       if (cached) {
         setThumbSrc(cached)
       } else {
-        ensureImageCached(task.outputImages[0]).then((url) => {
-          if (url) setThumbSrc(url)
+        ensureImageCached(imageId).then((url) => {
+          if (!cancelled && url) setThumbSrc(url)
         })
+      }
+      return () => {
+        cancelled = true
       }
     }
   }, [task.outputImages])
 
   useEffect(() => {
-    if (!thumbSrc) return
+    const imageId = task.outputImages?.[0]
+    if (!thumbSrc || !imageId) return
+
+    const cachedMeta = imageMetaCache.get(imageId)
+    if (cachedMeta) {
+      setCoverRatio(cachedMeta.ratio)
+      setCoverSize(cachedMeta.size)
+      return
+    }
 
     let cancelled = false
     const image = new Image()
     image.onload = () => {
       if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) {
-        setCoverRatio(formatImageRatio(image.naturalWidth, image.naturalHeight))
-        setCoverSize(`${image.naturalWidth}×${image.naturalHeight}`)
+        const meta = {
+          ratio: formatImageRatio(image.naturalWidth, image.naturalHeight),
+          size: `${image.naturalWidth}×${image.naturalHeight}`,
+        }
+        imageMetaCache.set(imageId, meta)
+        setCoverRatio(meta.ratio)
+        setCoverSize(meta.size)
       }
     }
     image.src = thumbSrc
     if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
-      setCoverRatio(formatImageRatio(image.naturalWidth, image.naturalHeight))
-      setCoverSize(`${image.naturalWidth}×${image.naturalHeight}`)
+      const meta = {
+        ratio: formatImageRatio(image.naturalWidth, image.naturalHeight),
+        size: `${image.naturalWidth}×${image.naturalHeight}`,
+      }
+      imageMetaCache.set(imageId, meta)
+      setCoverRatio(meta.ratio)
+      setCoverSize(meta.size)
     }
 
     return () => {
       cancelled = true
     }
-  }, [thumbSrc])
+  }, [task.outputImages, thumbSrc])
 
   const duration = (() => {
     let seconds: number

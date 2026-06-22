@@ -1,5 +1,5 @@
 import { DEFAULT_PARAMS, type AppSettings, type TaskParams } from '../types'
-import { getActiveApiProfile } from './apiProfiles'
+import type { PublicGenerationModel } from '../types'
 import { normalizeImageSize } from './size'
 
 export const DEFAULT_FAL_IMAGE_SIZE = '1360x1024'
@@ -7,24 +7,39 @@ export const MAX_OUTPUT_IMAGES = 3
 export const MAX_FAL_OUTPUT_IMAGES = MAX_OUTPUT_IMAGES
 export const MAX_OPENAI_OUTPUT_IMAGES = MAX_OUTPUT_IMAGES
 
-export function getOutputImageLimitForSettings(settings: AppSettings) {
-  return getActiveApiProfile(settings).provider === 'fal' ? MAX_FAL_OUTPUT_IMAGES : MAX_OPENAI_OUTPUT_IMAGES
+type CompatibilityContext = AppSettings | PublicGenerationModel | null | undefined
+
+function getProvider(context: CompatibilityContext) {
+  return context && 'provider' in context ? context.provider : 'openai'
 }
 
-export function normalizeParamsForSettings(params: TaskParams, settings: AppSettings): TaskParams {
-  const activeProfile = getActiveApiProfile(settings)
-  const outputImageLimit = getOutputImageLimitForSettings(settings)
+function getCodexCompatible(context: CompatibilityContext) {
+  return Boolean(context && 'codexCompatible' in context && context.codexCompatible)
+}
+
+export function getOutputImageLimitForSettings(context: CompatibilityContext) {
+  return getProvider(context) === 'fal' ? MAX_FAL_OUTPUT_IMAGES : MAX_OPENAI_OUTPUT_IMAGES
+}
+
+export function normalizeParamsForSettings(params: TaskParams, context: CompatibilityContext): TaskParams {
+  const provider = getProvider(context)
+  const codexCompatible = getCodexCompatible(context)
+  const outputImageLimit = getOutputImageLimitForSettings(context)
   const nextParams: TaskParams = {
     ...params,
     size: normalizeImageSize(params.size) || DEFAULT_PARAMS.size,
     n: Math.min(outputImageLimit, Math.max(1, params.n || DEFAULT_PARAMS.n)),
   }
 
-  if (activeProfile.provider === 'openai' && activeProfile.codexCli) {
+  if (provider === 'openai' && codexCompatible) {
+    nextParams.size = DEFAULT_PARAMS.size
     nextParams.quality = DEFAULT_PARAMS.quality
+    nextParams.output_format = DEFAULT_PARAMS.output_format
+    nextParams.output_compression = DEFAULT_PARAMS.output_compression
+    nextParams.moderation = DEFAULT_PARAMS.moderation
   }
 
-  if (activeProfile.provider === 'fal') {
+  if (provider === 'fal') {
     if (nextParams.size === 'auto') nextParams.size = DEFAULT_FAL_IMAGE_SIZE
     if (nextParams.quality === 'auto') nextParams.quality = 'high'
     nextParams.moderation = DEFAULT_PARAMS.moderation

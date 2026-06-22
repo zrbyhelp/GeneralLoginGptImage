@@ -46,13 +46,15 @@ async function flushPromises(times = 8) {
 }
 
 const apiConfig: ServerApiConfig = {
+  id: 'model-default',
+  name: '默认模型',
   provider: 'openai',
   baseUrl: 'https://api.example.com/v1',
   apiKey: 'test-key',
   model: 'gpt-image-2',
   timeout: 10,
   apiMode: 'images',
-  codexCli: false,
+  codexCompatible: false,
 }
 
 const params: TaskParams = {
@@ -88,11 +90,10 @@ const adminUser: AppUser = {
 
 function settings(overrides: Partial<AdminSettings> = {}): AdminSettings {
   return {
-    apiConfig,
-    premiumApiConfig: apiConfig,
+    models: [{ ...apiConfig, enabled: true }],
+    defaultModelId: apiConfig.id,
     dailyPointsTarget: 100,
     standardPointCost: 1,
-    premiumPointCost: 300,
     galleryUploadDefault: false,
     hourlyImageLimit: 20,
     privacyHourlyImageLimit: 5,
@@ -158,7 +159,7 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 3 }),
       apiConfig,
-      usePremiumApi: false,
+
       prompt: 'prompt',
       params: { ...params, n: 2 },
       inputImageDataUrls: [],
@@ -173,7 +174,7 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 3 }),
       apiConfig,
-      usePremiumApi: false,
+
       prompt: 'prompt',
       params: { ...params, n: 2 },
       inputImageDataUrls: [],
@@ -198,7 +199,7 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 5 }),
       apiConfig,
-      usePremiumApi: false,
+
       prompt: 'first',
       params,
       inputImageDataUrls: [],
@@ -211,7 +212,7 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings({ userConcurrentImageLimit: 5 }),
       apiConfig,
-      usePremiumApi: false,
+
       prompt: 'second',
       params,
       inputImageDataUrls: [],
@@ -250,7 +251,7 @@ describe('image generation queue', () => {
       isAdmin: false,
       settings: settings(),
       apiConfig,
-      usePremiumApi: false,
+
       prompt: 'normal',
       params,
       inputImageDataUrls: [],
@@ -265,7 +266,7 @@ describe('image generation queue', () => {
       isAdmin: true,
       settings: settings({ userConcurrentImageLimit: 1 }),
       apiConfig,
-      usePremiumApi: false,
+
       prompt: 'admin',
       params: { ...params, n: 2 },
       inputImageDataUrls: [],

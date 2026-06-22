@@ -1,23 +1,14 @@
-import type { ApiMode, ApiProvider } from '../../src/types'
+import type { AdminModelConfig, ApiMode, ApiProvider, PublicGenerationModel } from '../../src/types'
 import { createError } from 'h3'
 import { getDb } from './db'
 
-export interface ServerApiConfig {
-  provider: ApiProvider
-  baseUrl: string
-  apiKey: string
-  model: string
-  timeout: number
-  apiMode: ApiMode
-  codexCli: boolean
-}
+export type ServerApiConfig = Omit<AdminModelConfig, 'enabled'>
 
 export interface AdminSettings {
-  apiConfig: ServerApiConfig
-  premiumApiConfig: ServerApiConfig
+  models: AdminModelConfig[]
+  defaultModelId: string
   dailyPointsTarget: number
   standardPointCost: number
-  premiumPointCost: number
   galleryUploadDefault: boolean
   hourlyImageLimit: number
   privacyHourlyImageLimit: number
@@ -28,10 +19,7 @@ export interface AdminSettings {
   updatedAt: string | null
 }
 
-export type AdminSettingsPatch = Partial<Omit<AdminSettings, 'apiConfig' | 'premiumApiConfig'>> & {
-  apiConfig?: Partial<ServerApiConfig>
-  premiumApiConfig?: Partial<ServerApiConfig>
-}
+export type AdminSettingsPatch = Partial<AdminSettings>
 
 interface AdminSettingsRow {
   provider: string
@@ -58,6 +46,8 @@ interface AdminSettingsRow {
   user_concurrent_image_limit: number
   gallery_upload_url: string
   gallery_upload_token: string
+  models_json?: string | null
+  default_model_id?: string | null
   updated_at: string | null
 }
 
@@ -80,115 +70,144 @@ function parseBoolean(value: unknown) {
   return value === true || String(value).toLowerCase() === 'true'
 }
 
-function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: ApiProvider }) {
+function createModelId(prefix = 'model') {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: ApiProvider }): ServerApiConfig {
   const provider = parseProvider(defaults.provider)
   const fallbackModel = provider === 'fal' ? 'openai/gpt-image-2' : 'gpt-image-2'
   return {
+    id: typeof defaults.id === 'string' && defaults.id.trim() ? defaults.id : createModelId(provider),
+    name: typeof defaults.name === 'string' && defaults.name.trim() ? defaults.name.trim() : '默认模型',
     provider,
-    baseUrl: String(defaults.baseUrl || (provider === 'fal' ? 'https://fal.run' : 'https://api.openai.com/v1')),
+    baseUrl: String(defaults.baseUrl || (provider === 'fal' ? 'https://fal.run' : 'https://api.openai.com/v1')).trim(),
     apiKey: String(defaults.apiKey || ''),
-    model: String(defaults.model || fallbackModel),
+    model: String(defaults.model || fallbackModel).trim() || fallbackModel,
     timeout: parsePositiveInt(defaults.timeout, 600, 10, 3600),
     apiMode: provider === 'fal' ? 'images' : parseApiMode(defaults.apiMode),
-    codexCli: provider === 'openai' ? Boolean(defaults.codexCli) : false,
-  } satisfies ServerApiConfig
+    codexCompatible: provider === 'openai' ? Boolean(defaults.codexCompatible) : false,
+  }
 }
 
-export function getDefaultAdminSettings(): AdminSettings {
+function createAdminModel(defaults: Partial<AdminModelConfig> & { provider: ApiProvider }): AdminModelConfig {
+  return {
+    ...createServerApiConfig(defaults),
+    enabled: typeof defaults.enabled === 'boolean' ? defaults.enabled : true,
+  }
+}
+
+function legacyApiConfigFromRuntime() {
   const config = useRuntimeConfig()
   const provider = parseProvider(config.apiProvider)
-  const apiConfig = createServerApiConfig({
+  return createAdminModel({
+    id: 'default-model',
+    name: '默认模型',
     provider,
     baseUrl: String(config.apiBaseUrl || (provider === 'fal' ? 'https://fal.run' : 'https://api.openai.com/v1')),
     apiKey: String(config.apiKey || ''),
     model: String(config.apiModel || (provider === 'fal' ? 'openai/gpt-image-2' : 'gpt-image-2')),
     timeout: parsePositiveInt(config.apiTimeout, 600, 10, 3600),
     apiMode: parseApiMode(config.apiMode),
-    codexCli: parseBoolean(config.apiCodexCli),
+    codexCompatible: parseBoolean(config.apiCodexCli),
+    enabled: true,
   })
-  const premiumProvider = parseProvider(config.premiumApiProvider || apiConfig.provider)
+}
 
-  return {
-    apiConfig,
-    premiumApiConfig: createServerApiConfig({
-      provider: premiumProvider,
-      baseUrl: String(config.premiumApiBaseUrl || apiConfig.baseUrl),
-      apiKey: String(config.premiumApiKey || apiConfig.apiKey),
-      model: String(config.premiumApiModel || apiConfig.model),
-      timeout: parsePositiveInt(config.premiumApiTimeout, apiConfig.timeout, 10, 3600),
-      apiMode: parseApiMode(config.premiumApiMode || apiConfig.apiMode),
-      codexCli: parseBoolean(config.premiumApiCodexCli || apiConfig.codexCli),
-    }),
-    dailyPointsTarget: parsePositiveInt(config.defaultDailyPointsTarget, 100, 1, 1_000_000),
-    standardPointCost: parsePositiveInt(config.defaultStandardPointCost, 1, 1, 1_000_000),
-    premiumPointCost: parsePositiveInt(config.defaultPremiumPointCost, 300, 1, 1_000_000),
-    galleryUploadDefault: parseBoolean(config.defaultGalleryUploadDefault),
-    hourlyImageLimit: parsePositiveInt(config.defaultHourlyImageLimit, 20, 1, 1000),
-    privacyHourlyImageLimit: parsePositiveInt(config.defaultPrivacyHourlyImageLimit, 5, 1, 1000),
-    serviceConcurrentImageLimit: parsePositiveInt(config.defaultServiceConcurrentImageLimit, 3, 1, 1000),
-    userConcurrentImageLimit: parsePositiveInt(config.defaultUserConcurrentImageLimit, 3, 1, 1000),
-    galleryUploadUrl: String(config.galleryUploadUrl || 'https://imglist.zrbyhelp.com/api/uploads/third-party').trim(),
-    galleryUploadToken: String(config.galleryUploadToken || ''),
-    updatedAt: null,
+function legacyModelFromRow(row: AdminSettingsRow) {
+  return createAdminModel({
+    id: 'default-model',
+    name: '默认模型',
+    provider: parseProvider(row.provider),
+    baseUrl: row.base_url,
+    apiKey: row.api_key,
+    model: row.model,
+    timeout: row.timeout,
+    apiMode: parseApiMode(row.api_mode),
+    codexCompatible: Boolean(row.codex_cli),
+    enabled: true,
+  })
+}
+
+function dedupeModelId(id: string, usedIds: Set<string>, provider: ApiProvider) {
+  let nextId = id.trim() || createModelId(provider)
+  while (usedIds.has(nextId)) nextId = createModelId(provider)
+  usedIds.add(nextId)
+  return nextId
+}
+
+function normalizeModels(input: unknown, fallbackModels: AdminModelConfig[]): AdminModelConfig[] {
+  const records = Array.isArray(input) ? input : []
+  const source = records.length ? records : fallbackModels
+  const usedIds = new Set<string>()
+  const models = source.map((item) => {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    const provider = parseProvider(record.provider)
+    const id = dedupeModelId(typeof record.id === 'string' ? record.id : '', usedIds, provider)
+    return createAdminModel({
+      id,
+      name: typeof record.name === 'string' ? record.name : '',
+      provider,
+      baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : undefined,
+      apiKey: typeof record.apiKey === 'string' ? record.apiKey : undefined,
+      model: typeof record.model === 'string' ? record.model : undefined,
+      timeout: typeof record.timeout === 'number' ? record.timeout : undefined,
+      apiMode: record.apiMode,
+      codexCompatible: Boolean(record.codexCompatible ?? record.codexCli),
+      enabled: typeof record.enabled === 'boolean' ? record.enabled : true,
+    })
+  })
+  return models.length ? models : [legacyApiConfigFromRuntime()]
+}
+
+function readModelsJson(value: unknown, fallbackModels: AdminModelConfig[]) {
+  if (typeof value !== 'string' || !value.trim()) return fallbackModels
+  try {
+    return normalizeModels(JSON.parse(value), fallbackModels)
+  } catch {
+    return fallbackModels
   }
 }
 
-function normalizeSettings(input: Partial<AdminSettings> | null | undefined): AdminSettings {
-  const defaults = getDefaultAdminSettings()
-  const normalizeApi = (api: Partial<ServerApiConfig> | undefined, fallback: ServerApiConfig) => {
-    const provider = parseProvider(api?.provider ?? fallback.provider)
-    const fallbackModel = provider === 'fal' ? 'openai/gpt-image-2' : 'gpt-image-2'
-    return {
-      provider,
-      baseUrl: String(api?.baseUrl ?? fallback.baseUrl).trim(),
-      apiKey: String(api?.apiKey ?? fallback.apiKey),
-      model: String(api?.model ?? fallbackModel).trim() || fallbackModel,
-      timeout: parsePositiveInt(api?.timeout, fallback.timeout, 10, 3600),
-      apiMode: provider === 'fal' ? 'images' : parseApiMode(api?.apiMode ?? fallback.apiMode),
-      codexCli: provider === 'openai' ? Boolean(api?.codexCli ?? fallback.codexCli) : false,
-    } satisfies ServerApiConfig
-  }
+function normalizeSettings(input: Partial<AdminSettings> | null | undefined, fallbackModels?: AdminModelConfig[]): AdminSettings {
+  const config = useRuntimeConfig()
+  const defaultModels = fallbackModels?.length ? fallbackModels : [legacyApiConfigFromRuntime()]
+  const models = normalizeModels(input?.models, defaultModels)
+  const requestedDefaultId = typeof input?.defaultModelId === 'string' ? input.defaultModelId : ''
+  const defaultModelId = models.find((model) => model.id === requestedDefaultId && model.enabled)?.id ??
+    models.find((model) => model.enabled)?.id ??
+    models[0].id
 
   return {
-    apiConfig: normalizeApi(input?.apiConfig, defaults.apiConfig),
-    premiumApiConfig: normalizeApi(input?.premiumApiConfig, defaults.premiumApiConfig),
-    dailyPointsTarget: parsePositiveInt(input?.dailyPointsTarget, defaults.dailyPointsTarget, 1, 1_000_000),
-    standardPointCost: parsePositiveInt(input?.standardPointCost, defaults.standardPointCost, 1, 1_000_000),
-    premiumPointCost: parsePositiveInt(input?.premiumPointCost, defaults.premiumPointCost, 1, 1_000_000),
-    galleryUploadDefault: typeof input?.galleryUploadDefault === 'boolean' ? input.galleryUploadDefault : defaults.galleryUploadDefault,
-    hourlyImageLimit: parsePositiveInt(input?.hourlyImageLimit, defaults.hourlyImageLimit, 1, 1000),
-    privacyHourlyImageLimit: parsePositiveInt(input?.privacyHourlyImageLimit, defaults.privacyHourlyImageLimit, 1, 1000),
-    serviceConcurrentImageLimit: parsePositiveInt(input?.serviceConcurrentImageLimit, defaults.serviceConcurrentImageLimit, 1, 1000),
-    userConcurrentImageLimit: parsePositiveInt(input?.userConcurrentImageLimit, defaults.userConcurrentImageLimit, 1, 1000),
-    galleryUploadUrl: String(input?.galleryUploadUrl ?? defaults.galleryUploadUrl).trim() || defaults.galleryUploadUrl,
-    galleryUploadToken: String(input?.galleryUploadToken ?? defaults.galleryUploadToken),
-    updatedAt: typeof input?.updatedAt === 'string' ? input.updatedAt : defaults.updatedAt,
+    models,
+    defaultModelId,
+    dailyPointsTarget: parsePositiveInt(input?.dailyPointsTarget ?? config.defaultDailyPointsTarget, 100, 1, 1_000_000),
+    standardPointCost: parsePositiveInt(input?.standardPointCost ?? config.defaultStandardPointCost, 1, 1, 1_000_000),
+    galleryUploadDefault: typeof input?.galleryUploadDefault === 'boolean'
+      ? input.galleryUploadDefault
+      : parseBoolean(config.defaultGalleryUploadDefault),
+    hourlyImageLimit: parsePositiveInt(input?.hourlyImageLimit ?? config.defaultHourlyImageLimit, 20, 1, 1000),
+    privacyHourlyImageLimit: parsePositiveInt(input?.privacyHourlyImageLimit ?? config.defaultPrivacyHourlyImageLimit, 5, 1, 1000),
+    serviceConcurrentImageLimit: parsePositiveInt(input?.serviceConcurrentImageLimit ?? config.defaultServiceConcurrentImageLimit, 3, 1, 1000),
+    userConcurrentImageLimit: parsePositiveInt(input?.userConcurrentImageLimit ?? config.defaultUserConcurrentImageLimit, 3, 1, 1000),
+    galleryUploadUrl: String(input?.galleryUploadUrl ?? config.galleryUploadUrl ?? 'https://imglist.zrbyhelp.com/api/uploads/third-party').trim() || 'https://imglist.zrbyhelp.com/api/uploads/third-party',
+    galleryUploadToken: String(input?.galleryUploadToken ?? config.galleryUploadToken ?? ''),
+    updatedAt: typeof input?.updatedAt === 'string' ? input.updatedAt : null,
   }
+}
+
+export function getDefaultAdminSettings(): AdminSettings {
+  return normalizeSettings(null)
 }
 
 function rowToSettings(row: AdminSettingsRow): AdminSettings {
+  const fallbackModels = [legacyModelFromRow(row)]
+  const models = readModelsJson(row.models_json, fallbackModels)
   return normalizeSettings({
-    apiConfig: {
-      provider: row.provider as ApiProvider,
-      baseUrl: row.base_url,
-      apiKey: row.api_key,
-      model: row.model,
-      timeout: row.timeout,
-      apiMode: row.api_mode as ApiMode,
-      codexCli: Boolean(row.codex_cli),
-    },
-    premiumApiConfig: {
-      provider: row.premium_provider as ApiProvider,
-      baseUrl: row.premium_base_url,
-      apiKey: row.premium_api_key,
-      model: row.premium_model,
-      timeout: row.premium_timeout,
-      apiMode: row.premium_api_mode as ApiMode,
-      codexCli: Boolean(row.premium_codex_cli),
-    },
+    models,
+    defaultModelId: row.default_model_id ?? models.find((model) => model.enabled)?.id ?? models[0]?.id,
     dailyPointsTarget: row.daily_points_target,
     standardPointCost: row.standard_point_cost,
-    premiumPointCost: row.premium_point_cost,
     galleryUploadDefault: Boolean(row.gallery_upload_default),
     hourlyImageLimit: row.hourly_image_limit,
     privacyHourlyImageLimit: row.privacy_hourly_image_limit,
@@ -197,7 +216,7 @@ function rowToSettings(row: AdminSettingsRow): AdminSettings {
     galleryUploadUrl: row.gallery_upload_url,
     galleryUploadToken: row.gallery_upload_token,
     updatedAt: row.updated_at,
-  })
+  }, fallbackModels)
 }
 
 export async function getAdminSettings() {
@@ -205,21 +224,47 @@ export async function getAdminSettings() {
   return row ? rowToSettings(row) : getDefaultAdminSettings()
 }
 
+export function getPublicGenerationModels(settings: AdminSettings): PublicGenerationModel[] {
+  return settings.models
+    .filter((model) => model.enabled)
+    .map((model) => ({
+      id: model.id,
+      name: model.name,
+      provider: model.provider,
+      model: model.model,
+      apiMode: model.apiMode,
+      codexCompatible: model.codexCompatible,
+    }))
+}
+
+export function selectGenerationModel(settings: AdminSettings, modelId?: unknown): AdminModelConfig {
+  const requestedId = typeof modelId === 'string' ? modelId.trim() : ''
+  const model = requestedId
+    ? settings.models.find((item) => item.id === requestedId)
+    : settings.models.find((item) => item.id === settings.defaultModelId && item.enabled) ?? settings.models.find((item) => item.enabled)
+
+  if (!model) {
+    if (requestedId) {
+      throw createError({ statusCode: 400, statusMessage: '所选模型不存在' })
+    }
+    throw createError({ statusCode: 500, statusMessage: '管理员尚未配置可用模型' })
+  }
+  if (!model.enabled) {
+    throw createError({ statusCode: 400, statusMessage: '所选模型已禁用' })
+  }
+  return model
+}
+
 export async function updateAdminSettings(patch: AdminSettingsPatch) {
   const current = await getAdminSettings()
   const merged = normalizeSettings({
     ...current,
     ...patch,
-    apiConfig: {
-      ...current.apiConfig,
-      ...(patch.apiConfig ?? {}),
-    },
-    premiumApiConfig: {
-      ...current.premiumApiConfig,
-      ...(patch.premiumApiConfig ?? {}),
-    },
+    models: patch.models ?? current.models,
+    defaultModelId: patch.defaultModelId ?? current.defaultModelId,
     updatedAt: new Date().toISOString(),
-  })
+  }, current.models)
+  const defaultModel = merged.models.find((model) => model.id === merged.defaultModelId) ?? merged.models[0]
 
   getDb().prepare(`
     INSERT INTO admin_settings (
@@ -248,6 +293,8 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       user_concurrent_image_limit,
       gallery_upload_url,
       gallery_upload_token,
+      models_json,
+      default_model_id,
       updated_at
     ) VALUES (
       'default',
@@ -258,16 +305,16 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       @timeout,
       @apiMode,
       @codexCli,
-      @premiumProvider,
-      @premiumBaseUrl,
-      @premiumApiKey,
-      @premiumModel,
-      @premiumTimeout,
-      @premiumApiMode,
-      @premiumCodexCli,
+      @provider,
+      @baseUrl,
+      @apiKey,
+      @model,
+      @timeout,
+      @apiMode,
+      @codexCli,
       @dailyPointsTarget,
       @standardPointCost,
-      @premiumPointCost,
+      @standardPointCost,
       @galleryUploadDefault,
       @hourlyImageLimit,
       @privacyHourlyImageLimit,
@@ -275,6 +322,8 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       @userConcurrentImageLimit,
       @galleryUploadUrl,
       @galleryUploadToken,
+      @modelsJson,
+      @defaultModelId,
       @updatedAt
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -302,25 +351,19 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
       user_concurrent_image_limit = excluded.user_concurrent_image_limit,
       gallery_upload_url = excluded.gallery_upload_url,
       gallery_upload_token = excluded.gallery_upload_token,
+      models_json = excluded.models_json,
+      default_model_id = excluded.default_model_id,
       updated_at = excluded.updated_at
   `).run({
-    provider: merged.apiConfig.provider,
-    baseUrl: merged.apiConfig.baseUrl,
-    apiKey: merged.apiConfig.apiKey,
-    model: merged.apiConfig.model,
-    timeout: merged.apiConfig.timeout,
-    apiMode: merged.apiConfig.apiMode,
-    codexCli: merged.apiConfig.codexCli ? 1 : 0,
-    premiumProvider: merged.premiumApiConfig.provider,
-    premiumBaseUrl: merged.premiumApiConfig.baseUrl,
-    premiumApiKey: merged.premiumApiConfig.apiKey,
-    premiumModel: merged.premiumApiConfig.model,
-    premiumTimeout: merged.premiumApiConfig.timeout,
-    premiumApiMode: merged.premiumApiConfig.apiMode,
-    premiumCodexCli: merged.premiumApiConfig.codexCli ? 1 : 0,
+    provider: defaultModel.provider,
+    baseUrl: defaultModel.baseUrl,
+    apiKey: defaultModel.apiKey,
+    model: defaultModel.model,
+    timeout: defaultModel.timeout,
+    apiMode: defaultModel.apiMode,
+    codexCli: defaultModel.codexCompatible ? 1 : 0,
     dailyPointsTarget: merged.dailyPointsTarget,
     standardPointCost: merged.standardPointCost,
-    premiumPointCost: merged.premiumPointCost,
     galleryUploadDefault: merged.galleryUploadDefault ? 1 : 0,
     hourlyImageLimit: merged.hourlyImageLimit,
     privacyHourlyImageLimit: merged.privacyHourlyImageLimit,
@@ -328,6 +371,8 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
     userConcurrentImageLimit: merged.userConcurrentImageLimit,
     galleryUploadUrl: merged.galleryUploadUrl,
     galleryUploadToken: merged.galleryUploadToken,
+    modelsJson: JSON.stringify(merged.models),
+    defaultModelId: merged.defaultModelId,
     updatedAt: merged.updatedAt,
   })
 

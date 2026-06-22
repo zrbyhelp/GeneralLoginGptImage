@@ -36,6 +36,15 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock('./lib/db', () => dbMocks)
 vi.mock('./lib/api', () => apiMocks)
 
+const testModel = {
+  id: 'model-default',
+  name: '默认模型',
+  provider: 'openai' as const,
+  model: 'gpt-image-2',
+  apiMode: 'images' as const,
+  codexCompatible: false,
+}
+
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 
 async function flushPromises(times = 8) {
@@ -97,8 +106,10 @@ describe('mask draft lifecycle in store actions', () => {
         generationDefaults: {
           dailyPointsTarget: 100,
           standardPointCost: 1,
-          premiumPointCost: 300,
+
           galleryUploadDefault: false,
+          models: [testModel],
+          defaultModelId: testModel.id,
         },
       },
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
@@ -180,8 +191,10 @@ describe('submit task safeguards', () => {
         generationDefaults: {
           dailyPointsTarget: 100,
           standardPointCost: 1,
-          premiumPointCost: 300,
+
           galleryUploadDefault: false,
+          models: [testModel],
+          defaultModelId: testModel.id,
         },
       },
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
@@ -228,6 +241,9 @@ describe('submit task safeguards', () => {
     expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'prompt',
       status: 'queued',
+      modelId: testModel.id,
+      apiProfileName: testModel.name,
+      apiModel: testModel.model,
     }))
     expect(useStore.getState().prompt).toBe('')
   })
@@ -251,8 +267,10 @@ describe('submit task safeguards', () => {
         generationDefaults: {
           dailyPointsTarget: 100,
           standardPointCost: 1,
-          premiumPointCost: 300,
+
           galleryUploadDefault: false,
+          models: [testModel],
+          defaultModelId: testModel.id,
         },
       },
     })
@@ -362,8 +380,10 @@ describe('submit task safeguards', () => {
         generationDefaults: {
           dailyPointsTarget: 100,
           standardPointCost: 1,
-          premiumPointCost: 300,
+
           galleryUploadDefault: false,
+          models: [testModel],
+          defaultModelId: testModel.id,
         },
       },
     })

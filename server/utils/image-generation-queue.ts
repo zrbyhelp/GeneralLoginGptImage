@@ -26,7 +26,6 @@ interface ImageGenerationJob {
   isAdmin: boolean
   settings: AdminSettings
   apiConfig: ServerApiConfig
-  usePremiumApi: boolean
   prompt: string
   params: TaskParams
   inputImageDataUrls: string[]
@@ -39,11 +38,12 @@ interface ImageGenerationJob {
   error: string | null
   result: (ServerImageApiResult & {
     apiProvider: ServerApiConfig['provider']
+    modelId: string
     apiProfileName: string
     apiModel: string
+    apiCodexCompatible: boolean
     privacyMode: boolean
     uploadToGallery: boolean
-    usePremiumApi: boolean
     pointsBalance: number
     chargedPoints: number
     refundedPoints: number
@@ -69,12 +69,13 @@ export interface PublicImageGenerationJobStatus {
   revisedPrompts?: Array<string | undefined>
   partialError?: string | null
   apiProvider?: ServerApiConfig['provider']
+  modelId?: string
   apiProfileName?: string
   apiModel?: string
+  apiCodexCompatible?: boolean
   galleryUploadError?: string | null
   privacyMode?: boolean
   uploadToGallery?: boolean
-  usePremiumApi?: boolean
   pointsBalance?: number
   chargedPoints?: number
   refundedPoints?: number
@@ -220,11 +221,12 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
       revisedPrompts: undefined,
       partialError: errors.length ? errors.join('\n') : null,
       apiProvider: job.apiConfig.provider,
-      apiProfileName: job.usePremiumApi ? '2K-4K 专用配置' : '统一配置',
+      modelId: job.apiConfig.id,
+      apiProfileName: job.apiConfig.name,
       apiModel: job.apiConfig.model,
+      apiCodexCompatible: job.apiConfig.codexCompatible,
       privacyMode: !job.uploadToGallery,
       uploadToGallery: job.uploadToGallery,
-      usePremiumApi: job.usePremiumApi,
       pointsBalance: settlement.balance,
       chargedPoints: settlement.chargedPoints,
       refundedPoints: settlement.refundedPoints,
@@ -288,11 +290,12 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
     revisedPrompts,
     partialError: errors.length ? errors.join('\n') : null,
     apiProvider: job.apiConfig.provider,
-    apiProfileName: job.usePremiumApi ? '2K-4K 专用配置' : '统一配置',
+    modelId: job.apiConfig.id,
+    apiProfileName: job.apiConfig.name,
     apiModel: job.apiConfig.model,
+    apiCodexCompatible: job.apiConfig.codexCompatible,
     privacyMode: !job.uploadToGallery,
     uploadToGallery: job.uploadToGallery,
-    usePremiumApi: job.usePremiumApi,
     pointsBalance,
     chargedPoints,
     refundedPoints,
@@ -375,7 +378,6 @@ export async function createImageGenerationJob(input: {
   isAdmin: boolean
   settings: AdminSettings
   apiConfig: ServerApiConfig
-  usePremiumApi: boolean
   prompt: string
   params: TaskParams
   inputImageDataUrls: string[]
@@ -417,7 +419,6 @@ export async function createImageGenerationJob(input: {
     isAdmin: input.isAdmin,
     settings: input.settings,
     apiConfig: input.apiConfig,
-    usePremiumApi: input.usePremiumApi,
     prompt: input.prompt,
     params: { ...input.params, n: totalImages },
     inputImageDataUrls: input.inputImageDataUrls,
@@ -463,7 +464,6 @@ export function serializeImageGenerationJob(job: ImageGenerationJob): PublicImag
     runningImages: getRunningUnitCount(job),
     queuedImages: getQueuedUnitCount(job),
     error: job.error,
-    usePremiumApi: job.usePremiumApi,
     uploadToGallery: job.uploadToGallery,
     privacyMode: !job.uploadToGallery,
   }

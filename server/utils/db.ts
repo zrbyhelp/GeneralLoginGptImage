@@ -87,6 +87,8 @@ function initSchema(db: SqliteDatabase) {
       user_concurrent_image_limit INTEGER NOT NULL,
       gallery_upload_url TEXT NOT NULL,
       gallery_upload_token TEXT NOT NULL,
+      models_json TEXT,
+      default_model_id TEXT,
       updated_at TEXT
     );
 
@@ -241,6 +243,12 @@ function initSchema(db: SqliteDatabase) {
   }
   if (!adminSettingColumns.has('gallery_upload_token')) {
     db.exec("ALTER TABLE admin_settings ADD COLUMN gallery_upload_token TEXT NOT NULL DEFAULT ''")
+  }
+  if (!adminSettingColumns.has('models_json')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN models_json TEXT')
+  }
+  if (!adminSettingColumns.has('default_model_id')) {
+    db.exec('ALTER TABLE admin_settings ADD COLUMN default_model_id TEXT')
   }
 }
 

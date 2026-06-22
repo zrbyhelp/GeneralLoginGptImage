@@ -1,5 +1,5 @@
 import { getCurrentUser, isAdminUser } from '../../utils/auth'
-import { getAdminSettings } from '../../utils/admin-settings'
+import { getAdminSettings, getPublicGenerationModels } from '../../utils/admin-settings'
 import { ensureDailyPointsBalance } from '../../utils/points'
 
 export default defineEventHandler(async (event) => {
@@ -24,8 +24,9 @@ export default defineEventHandler(async (event) => {
     generationDefaults: {
       dailyPointsTarget: settings.dailyPointsTarget,
       standardPointCost: settings.standardPointCost,
-      premiumPointCost: settings.premiumPointCost,
       galleryUploadDefault: settings.galleryUploadDefault,
+      models: getPublicGenerationModels(settings),
+      defaultModelId: settings.defaultModelId,
     },
   }
 })

@@ -2,7 +2,6 @@ import { useRef, useEffect, useCallback, useState, useMemo, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import { useStore, submitTask, addImageFromFile, updateTaskInStore, removeMultipleTasks } from '../store'
 import { DEFAULT_PARAMS } from '../types'
-import { getActiveApiProfile } from '../lib/apiProfiles'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
@@ -38,8 +37,8 @@ export default function InputBar() {
   const auth = useStore((s) => s.auth)
   const uploadToGallery = useStore((s) => s.uploadToGallery)
   const setUploadToGallery = useStore((s) => s.setUploadToGallery)
-  const usePremiumApi = useStore((s) => s.usePremiumApi)
-  const setUsePremiumApi = useStore((s) => s.setUsePremiumApi)
+  const selectedModelId = useStore((s) => s.selectedModelId)
+  const setSelectedModelId = useStore((s) => s.setSelectedModelId)
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
@@ -157,16 +156,23 @@ export default function InputBar() {
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
 
-  const activeProfile = getActiveApiProfile(settings)
-  const activeProvider = activeProfile.provider
+  const models = auth.generationDefaults.models
+  const selectedModel = models.find((model) => model.id === selectedModelId) ??
+    models.find((model) => model.id === auth.generationDefaults.defaultModelId) ??
+    models[0] ??
+    null
+  const activeProvider = selectedModel?.provider ?? 'openai'
   const isFalProvider = activeProvider === 'fal'
-  const moderationDisabled = settings.apiMode === 'responses' || isFalProvider
-  const compressionDisabled = params.output_format === 'png' || isFalProvider
-  const outputImageLimit = getOutputImageLimitForSettings(settings)
+  const isCodexCompatible = Boolean(selectedModel?.codexCompatible)
+  const moderationDisabled = isCodexCompatible || selectedModel?.apiMode === 'responses' || isFalProvider
+  const compressionDisabled = isCodexCompatible || params.output_format === 'png' || isFalProvider
+  const outputFormatDisabled = isCodexCompatible
+  const sizeDisabled = isCodexCompatible
+  const qualityDisabled = isCodexCompatible
+  const outputImageLimit = getOutputImageLimitForSettings(selectedModel)
   const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
   const standardPointCost = auth.generationDefaults.standardPointCost
-  const premiumPointCost = auth.generationDefaults.premiumPointCost
-  const currentPointCost = usePremiumApi ? premiumPointCost : standardPointCost
+  const currentPointCost = standardPointCost
   const currentTotalPointCost = currentPointCost * Math.max(1, params.n || 1)
   const hasInsufficientPoints = pointsBalance != null && pointsBalance < currentTotalPointCost
   const canSubmit = Boolean(prompt.trim())
@@ -212,12 +218,12 @@ export default function InputBar() {
   }, [params.n])
 
   useEffect(() => {
-    const normalizedParams = normalizeParamsForSettings(params, settings)
+    const normalizedParams = normalizeParamsForSettings(params, selectedModel)
     const patch = getChangedParams(params, normalizedParams)
     if (Object.keys(patch).length) {
       setParams(patch)
     }
-  }, [params, settings, setParams])
+  }, [params, selectedModel, setParams])
 
   useEffect(() => () => {
     if (compressionHintTimerRef.current != null) {
@@ -375,11 +381,11 @@ export default function InputBar() {
   }
 
   const showQualityHint = () => {
-    if (settings.codexCli || isFalProvider) setQualityHintVisible(true)
+    if (isCodexCompatible || isFalProvider) setQualityHintVisible(true)
   }
 
   const showSizeHint = () => {
-    if (isFalProvider) setSizeHintVisible(true)
+    if (isCodexCompatible || isFalProvider) setSizeHintVisible(true)
   }
 
   const hideSizeHint = () => {
@@ -395,7 +401,7 @@ export default function InputBar() {
   }
 
   const startSizeHintTouch = () => {
-    if (!isFalProvider) return
+    if (!isCodexCompatible && !isFalProvider) return
     sizeHintTimerRef.current = window.setTimeout(() => {
       setSizeHintVisible(true)
       sizeHintTimerRef.current = null
@@ -415,7 +421,7 @@ export default function InputBar() {
   }
 
   const startQualityHintTouch = () => {
-    if (!settings.codexCli && !isFalProvider) return
+    if (!isCodexCompatible && !isFalProvider) return
     qualityHintTimerRef.current = window.setTimeout(() => {
       setQualityHintVisible(true)
       qualityHintTimerRef.current = null
@@ -956,15 +962,20 @@ export default function InputBar() {
         <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
         <button
           type="button"
-          onClick={() => setShowSizePicker(true)}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
+          onClick={() => !sizeDisabled && setShowSizePicker(true)}
+          disabled={sizeDisabled}
+          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono ${
+            sizeDisabled
+              ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
+              : 'bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06]'
+          }`}
           title="选择尺寸"
         >
           {displaySize}
         </button>
         <ButtonTooltip
-          visible={isFalProvider && sizeHintVisible}
-          text={<>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
+          visible={(isCodexCompatible || isFalProvider) && sizeHintVisible}
+          text={isCodexCompatible ? 'Codex 兼容模型不支持尺寸参数' : <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
         />
       </label>
       <label
@@ -978,32 +989,37 @@ export default function InputBar() {
       >
         <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
         <Select
-          value={settings.codexCli ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
+          value={qualityDisabled ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
           onChange={(val) => {
-            if (!settings.codexCli) setParams({ quality: val as any })
+            if (!qualityDisabled) setParams({ quality: val as any })
           }}
           options={qualityOptions}
-          disabled={settings.codexCli}
-          className={settings.codexCli
+          disabled={qualityDisabled}
+          className={qualityDisabled
             ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
             : selectClass}
         />
         <ButtonTooltip
-          visible={(settings.codexCli || isFalProvider) && qualityHintVisible}
-          text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</> : 'Codex CLI 不支持质量参数'}
+          visible={(qualityDisabled || isFalProvider) && qualityHintVisible}
+          text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</> : 'Codex 兼容模型不支持质量参数'}
         />
       </label>
       <label className="flex flex-col gap-0.5">
         <span className="text-gray-400 dark:text-gray-500 ml-1">格式</span>
         <Select
           value={params.output_format}
-          onChange={(val) => setParams({ output_format: val as any })}
+          onChange={(val) => {
+            if (!outputFormatDisabled) setParams({ output_format: val as any })
+          }}
           options={[
             { label: 'PNG', value: 'png' },
             { label: 'JPEG', value: 'jpeg' },
             { label: 'WebP', value: 'webp' },
           ]}
-          className={selectClass}
+          disabled={outputFormatDisabled}
+          className={outputFormatDisabled
+            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
+            : selectClass}
         />
       </label>
       <label
@@ -1033,7 +1049,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={compressionHintVisible}
-          text={isFalProvider ? 'fal.ai 不支持压缩率参数' : '仅 JPEG 和 WebP 支持压缩率'}
+          text={isCodexCompatible ? 'Codex 兼容模型不支持压缩率参数' : isFalProvider ? 'fal.ai 不支持压缩率参数' : '仅 JPEG 和 WebP 支持压缩率'}
         />
       </label>
       <label
@@ -1062,7 +1078,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={moderationDisabled && moderationHintVisible}
-          text={isFalProvider ? 'fal.ai 不支持审核参数' : 'Responses API 不支持审核参数'}
+          text={isCodexCompatible ? 'Codex 兼容模型不支持审核参数' : isFalProvider ? 'fal.ai 不支持审核参数' : 'Responses API 不支持审核参数'}
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
@@ -1131,7 +1147,7 @@ export default function InputBar() {
         </div>
       )}
 
-      {showSizePicker && (
+      {showSizePicker && !sizeDisabled && (
         <SizePickerModal
           currentSize={isFalProvider && params.size === 'auto' ? DEFAULT_FAL_IMAGE_SIZE : params.size}
           onSelect={(size) => setParams({ size })}
@@ -1261,25 +1277,24 @@ export default function InputBar() {
                 <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${uploadToGallery ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
               </span>
             </button>
-            <button
-              type="button"
-              onClick={() => setUsePremiumApi(!usePremiumApi)}
-              className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-gray-500 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-white/[0.06]"
-              title={`2K-4K 专用 API，本次约消耗 ${currentTotalPointCost} 积分`}
-              aria-label="切换 2K-4K 专用 API"
-              aria-pressed={usePremiumApi}
-            >
-              <svg className={`h-4 w-4 ${usePremiumApi ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
-              </svg>
-              <span className={usePremiumApi ? 'font-medium text-blue-600 dark:text-blue-300' : ''}>2K-4K 专用 API</span>
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${usePremiumApi ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'}`}>
+            <div className="flex min-w-[180px] max-w-full items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <span className="shrink-0">模型</span>
+              <div className="min-w-0 flex-1">
+                <Select
+                  value={selectedModel?.id ?? ''}
+                  onChange={(value) => setSelectedModelId(String(value))}
+                  options={models.map((model) => ({
+                    label: `${model.name}${model.codexCompatible ? ' · Codex' : ''}`,
+                    value: model.id,
+                  }))}
+                  disabled={!models.length}
+                  className="rounded-xl border border-gray-200/60 bg-white/50 px-3 py-1.5 text-xs shadow-sm transition-all duration-200 dark:border-white/[0.08] dark:bg-white/[0.03]"
+                />
+              </div>
+              <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
                 {currentPointCost}/张
               </span>
-              <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${usePremiumApi ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.16]'}`}>
-                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${usePremiumApi ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-              </span>
-            </button>
+            </div>
           </div>
 
           {/* 参数 + 按钮 */}

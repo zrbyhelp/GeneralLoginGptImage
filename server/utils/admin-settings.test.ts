@@ -1,0 +1,113 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getDefaultAdminSettings, getPublicGenerationModels, selectGenerationModel, updateAdminSettings, getAdminSettings } from './admin-settings'
+import { setDatabasePathForTests } from './db'
+
+describe('admin settings models', () => {
+  let tempRoot = ''
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'gip-admin-settings-'))
+    setDatabasePathForTests(join(tempRoot, 'app.db'))
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      apiProvider: 'openai',
+      apiBaseUrl: 'https://api.example.com/v1',
+      apiKey: 'env-key',
+      apiModel: 'gpt-image-2',
+      apiMode: 'images',
+      apiTimeout: '600',
+      apiCodexCli: 'false',
+      defaultHourlyImageLimit: '20',
+      defaultPrivacyHourlyImageLimit: '5',
+      defaultServiceConcurrentImageLimit: '3',
+      defaultUserConcurrentImageLimit: '3',
+    }))
+  })
+
+  afterEach(() => {
+    setDatabasePathForTests(null)
+    vi.unstubAllGlobals()
+    rmSync(tempRoot, { recursive: true, force: true })
+  })
+
+  it('creates a default model from runtime API config', () => {
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      apiProvider: 'openai',
+      apiBaseUrl: 'https://api.example.com/v1',
+      apiKey: 'env-key',
+      apiModel: 'gpt-image-2',
+      apiMode: 'images',
+      apiTimeout: '600',
+      apiCodexCli: 'true',
+      defaultHourlyImageLimit: '20',
+      defaultPrivacyHourlyImageLimit: '5',
+      defaultServiceConcurrentImageLimit: '3',
+      defaultUserConcurrentImageLimit: '3',
+    }))
+    const settings = getDefaultAdminSettings()
+
+    expect(settings.models[0]).toMatchObject({
+      id: 'default-model',
+      provider: 'openai',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'env-key',
+      model: 'gpt-image-2',
+      codexCompatible: true,
+      enabled: true,
+    })
+    expect(getPublicGenerationModels(settings)[0]).not.toHaveProperty('apiKey')
+  })
+
+  it('selects the default model and rejects disabled models', () => {
+    const defaults = getDefaultAdminSettings()
+    const settings = {
+      ...defaults,
+      models: [
+        { ...defaults.models[0], id: 'a', enabled: true },
+        { ...defaults.models[0], id: 'b', enabled: false },
+      ],
+      defaultModelId: 'a',
+    }
+
+    expect(selectGenerationModel(settings).id).toBe('a')
+    expect(() => selectGenerationModel(settings, 'b')).toThrow('所选模型已禁用')
+    expect(() => selectGenerationModel(settings, 'missing')).toThrow('所选模型不存在')
+  })
+
+  it('falls back to an enabled default model when the saved default is disabled', async () => {
+    const defaults = getDefaultAdminSettings()
+    const settings = await updateAdminSettings({
+      models: [
+        { ...defaults.models[0], id: 'disabled-default', enabled: false },
+        { ...defaults.models[0], id: 'enabled-fallback', enabled: true },
+      ],
+      defaultModelId: 'disabled-default',
+    })
+
+    expect(settings.defaultModelId).toBe('enabled-fallback')
+    expect(selectGenerationModel(settings).id).toBe('enabled-fallback')
+  })
+
+  it('persists model list through SQLite admin settings', async () => {
+    const model = {
+      id: 'model-a',
+      name: 'Model A',
+      provider: 'openai' as const,
+      baseUrl: 'https://api.a.test/v1',
+      apiKey: 'key-a',
+      model: 'gpt-image-2',
+      timeout: 120,
+      apiMode: 'responses' as const,
+      codexCompatible: true,
+      enabled: true,
+    }
+    await updateAdminSettings({ models: [model], defaultModelId: model.id })
+
+    const settings = await getAdminSettings()
+    expect(settings.models).toHaveLength(1)
+    expect(settings.models[0]).toMatchObject(model)
+    expect(settings.defaultModelId).toBe(model.id)
+  })
+})

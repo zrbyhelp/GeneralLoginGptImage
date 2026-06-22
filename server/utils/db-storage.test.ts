@@ -69,15 +69,22 @@ afterEach(() => {
 
 describe('SQLite-backed server storage', () => {
   it('persists admin settings without writing JSON files', async () => {
-    expect((await getAdminSettings()).apiConfig.apiKey).toBe('env-key')
+    expect((await getAdminSettings()).models[0].apiKey).toBe('env-key')
 
     await updateAdminSettings({
-      apiConfig: {
+      models: [{
+        id: 'custom-model',
+        name: 'Custom',
+        provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
         apiKey: 'db-key',
         model: 'custom-image-model',
         apiMode: 'responses',
-        codexCli: true,
-      },
+        codexCompatible: true,
+        timeout: 600,
+        enabled: true,
+      }],
+      defaultModelId: 'custom-model',
       hourlyImageLimit: 7,
       privacyHourlyImageLimit: 3,
       serviceConcurrentImageLimit: 4,
@@ -89,10 +96,14 @@ describe('SQLite-backed server storage', () => {
     setDatabasePathForTests(join(tempRoot, 'app.db'))
     const persisted = await getAdminSettings()
 
-    expect(persisted.apiConfig.apiKey).toBe('db-key')
-    expect(persisted.apiConfig.model).toBe('custom-image-model')
-    expect(persisted.apiConfig.apiMode).toBe('responses')
-    expect(persisted.apiConfig.codexCli).toBe(true)
+    expect(persisted.models[0]).toMatchObject({
+      id: 'custom-model',
+      apiKey: 'db-key',
+      model: 'custom-image-model',
+      apiMode: 'responses',
+      codexCompatible: true,
+    })
+    expect(persisted.defaultModelId).toBe('custom-model')
     expect(persisted.hourlyImageLimit).toBe(7)
     expect(persisted.privacyHourlyImageLimit).toBe(3)
     expect(persisted.serviceConcurrentImageLimit).toBe(4)

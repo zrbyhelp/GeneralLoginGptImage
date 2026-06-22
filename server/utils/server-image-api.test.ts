@@ -3,13 +3,15 @@ import type { ServerApiConfig } from './admin-settings'
 import { callServerImageApi } from './server-image-api'
 
 const config: ServerApiConfig = {
+  id: 'model-responses',
+  name: 'Responses model',
   provider: 'openai',
   baseUrl: 'https://api.example.com/v1',
   apiKey: 'test-key',
   model: 'gpt-5.5',
   timeout: 10,
   apiMode: 'responses',
-  codexCli: false,
+  codexCompatible: false,
 }
 
 const imagesConfig: ServerApiConfig = {
@@ -166,5 +168,57 @@ describe('server image API Images mode', () => {
     })).rejects.toThrow('first failure')
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('omits unsupported image parameters for Codex compatible models', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imagesImage('image-a'))
+
+    await callServerImageApi({
+      config: { ...imagesConfig, codexCompatible: true },
+      prompt: 'prompt',
+      params: { ...params, output_format: 'webp', output_compression: 80, moderation: 'low' },
+      inputImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body).toMatchObject({
+      model: imagesConfig.model,
+      prompt: expect.stringContaining('Do not rewrite it'),
+    })
+    expect(body).not.toHaveProperty('size')
+    expect(body).not.toHaveProperty('quality')
+    expect(body).not.toHaveProperty('output_format')
+    expect(body).not.toHaveProperty('output_compression')
+    expect(body).not.toHaveProperty('moderation')
+  })
+})
+
+describe('server image API Codex compatible Responses mode', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('omits unsupported tool parameters', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(responsesImage('image-a'))
+
+    await callServerImageApi({
+      config: { ...config, codexCompatible: true },
+      prompt: 'prompt',
+      params: { ...params, output_format: 'webp', output_compression: 80, moderation: 'low' },
+      inputImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.tools[0]).toMatchObject({
+      type: 'image_generation',
+      action: 'generate',
+    })
+    expect(body.tools[0]).not.toHaveProperty('size')
+    expect(body.tools[0]).not.toHaveProperty('quality')
+    expect(body.tools[0]).not.toHaveProperty('output_format')
+    expect(body.tools[0]).not.toHaveProperty('output_compression')
+    expect(body.tools[0]).not.toHaveProperty('moderation')
   })
 })

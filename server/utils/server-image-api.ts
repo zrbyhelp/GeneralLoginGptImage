@@ -155,11 +155,13 @@ function createResponsesImageTool(params: TaskParams, isEdit: boolean, config: S
   const tool: Record<string, unknown> = {
     type: 'image_generation',
     action: isEdit ? 'edit' : 'generate',
-    size: params.size,
-    output_format: params.output_format,
   }
-  if (!config.codexCli) tool.quality = params.quality
-  if (params.output_format !== 'png' && params.output_compression != null) {
+  if (!config.codexCompatible) {
+    tool.size = params.size
+    tool.output_format = params.output_format
+    tool.quality = params.quality
+  }
+  if (!config.codexCompatible && params.output_format !== 'png' && params.output_compression != null) {
     tool.output_compression = params.output_compression
   }
   if (maskDataUrl) {
@@ -230,11 +232,11 @@ async function callImagesApi(opts: {
     return mergeConcurrentResults(results)
   }
 
-  const prompt = opts.config.codexCli
+  const prompt = opts.config.codexCompatible
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${opts.prompt}`
     : opts.prompt
   const isEdit = opts.inputImageDataUrls.length > 0
-  const mime = MIME_MAP[opts.params.output_format] || 'image/png'
+  const mime = opts.config.codexCompatible ? 'image/png' : MIME_MAP[opts.params.output_format] || 'image/png'
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.config.timeout * 1000)
 
@@ -244,11 +246,13 @@ async function callImagesApi(opts: {
       const formData = new FormData()
       formData.append('model', opts.config.model)
       formData.append('prompt', prompt)
-      formData.append('size', opts.params.size)
-      formData.append('output_format', opts.params.output_format)
-      formData.append('moderation', opts.params.moderation)
-      if (!opts.config.codexCli) formData.append('quality', opts.params.quality)
-      if (opts.params.output_format !== 'png' && opts.params.output_compression != null) {
+      if (!opts.config.codexCompatible) {
+        formData.append('size', opts.params.size)
+        formData.append('output_format', opts.params.output_format)
+        formData.append('moderation', opts.params.moderation)
+        formData.append('quality', opts.params.quality)
+      }
+      if (!opts.config.codexCompatible && opts.params.output_format !== 'png' && opts.params.output_compression != null) {
         formData.append('output_compression', String(opts.params.output_compression))
       }
       if (opts.params.n > 1) formData.append('n', String(opts.params.n))
@@ -272,12 +276,14 @@ async function callImagesApi(opts: {
       const body: Record<string, unknown> = {
         model: opts.config.model,
         prompt,
-        size: opts.params.size,
-        output_format: opts.params.output_format,
-        moderation: opts.params.moderation,
       }
-      if (!opts.config.codexCli) body.quality = opts.params.quality
-      if (opts.params.output_format !== 'png' && opts.params.output_compression != null) {
+      if (!opts.config.codexCompatible) {
+        body.size = opts.params.size
+        body.output_format = opts.params.output_format
+        body.moderation = opts.params.moderation
+        body.quality = opts.params.quality
+      }
+      if (!opts.config.codexCompatible && opts.params.output_format !== 'png' && opts.params.output_compression != null) {
         body.output_compression = opts.params.output_compression
       }
       if (opts.params.n > 1) body.n = opts.params.n
@@ -340,7 +346,7 @@ async function callResponsesImageApi(opts: {
     return mergeConcurrentResults(results)
   }
 
-  const mime = MIME_MAP[opts.params.output_format] || 'image/png'
+  const mime = opts.config.codexCompatible ? 'image/png' : MIME_MAP[opts.params.output_format] || 'image/png'
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.config.timeout * 1000)
   try {

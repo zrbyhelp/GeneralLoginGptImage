@@ -40,7 +40,7 @@ describe('callImageApi', () => {
       inputImageDataUrls: ['data:image/png;base64,input'],
       maskDataUrl: 'data:image/png;base64,mask',
       uploadToGallery: true,
-      usePremiumApi: true,
+      modelId: 'model-a',
     })
 
     expect(result).toEqual({
@@ -66,7 +66,7 @@ describe('callImageApi', () => {
       inputImageDataUrls: ['data:image/png;base64,input'],
       maskDataUrl: 'data:image/png;base64,mask',
       uploadToGallery: true,
-      usePremiumApi: true,
+      modelId: 'model-a',
       privacyMode: false,
     })
   })
@@ -105,9 +105,9 @@ describe('callImageApi', () => {
     expect(body).not.toHaveProperty('provider')
     expect(body).not.toHaveProperty('apiMode')
     expect(body).not.toHaveProperty('codexCli')
+    expect(body).not.toHaveProperty('usePremiumApi')
     expect(body.params).not.toHaveProperty('apiKey')
     expect(body.uploadToGallery).toBe(false)
-    expect(body.usePremiumApi).toBe(false)
     expect(body.privacyMode).toBe(true)
   })
 
@@ -118,8 +118,10 @@ describe('callImageApi', () => {
       actualParamsList: [{ size: '1024x1024' }],
       revisedPrompts: ['revised'],
       apiProvider: 'fal',
+      modelId: 'model-fal',
       apiProfileName: '统一配置',
       apiModel: 'openai/gpt-image-2',
+      apiCodexCompatible: false,
       galleryUploadError: null,
       partialError: '第 2 张生成失败：HTTP 504',
     }), {
@@ -140,8 +142,10 @@ describe('callImageApi', () => {
       actualParamsList: [{ size: '1024x1024' }],
       revisedPrompts: ['revised'],
       apiProvider: 'fal',
+      modelId: 'model-fal',
       apiProfileName: '统一配置',
       apiModel: 'openai/gpt-image-2',
+      apiCodexCompatible: false,
       galleryUploadError: null,
       partialError: '第 2 张生成失败：HTTP 504',
     })

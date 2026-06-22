@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type {
   AppSettings,
   ApiProvider,
+  PublicGenerationModel,
   TaskParams,
   InputImage,
   MaskDraft,
@@ -98,8 +99,9 @@ interface AppState {
     generationDefaults: {
       dailyPointsTarget: number
       standardPointCost: number
-      premiumPointCost: number
       galleryUploadDefault: boolean
+      models: PublicGenerationModel[]
+      defaultModelId: string
     }
   }
   setAuth: (auth: Partial<AppState['auth']>) => void
@@ -117,16 +119,14 @@ interface AppState {
   // 设置
   settings: AppSettings
   setSettings: (s: Partial<AppSettings>) => void
-  dismissedCodexCliPrompts: string[]
-  dismissCodexCliPrompt: (key: string) => void
 
   // 输入
   prompt: string
   setPrompt: (p: string) => void
   uploadToGallery: boolean
   setUploadToGallery: (uploadToGallery: boolean) => void
-  usePremiumApi: boolean
-  setUsePremiumApi: (usePremiumApi: boolean) => void
+  selectedModelId: string
+  setSelectedModelId: (modelId: string) => void
   inputImages: InputImage[]
   addInputImage: (img: InputImage) => void
   removeInputImage: (idx: number) => void
@@ -212,11 +212,19 @@ export const useStore = create<AppState>()(
         generationDefaults: {
           dailyPointsTarget: 100,
           standardPointCost: 1,
-          premiumPointCost: 300,
           galleryUploadDefault: false,
+          models: [],
+          defaultModelId: '',
         },
       },
-      setAuth: (auth) => set((state) => ({ auth: { ...state.auth, ...auth } })),
+      setAuth: (auth) => set((state) => {
+        const nextAuth = { ...state.auth, ...auth }
+        const models = nextAuth.generationDefaults.models
+        const selectedModelId = models.some((model) => model.id === state.selectedModelId)
+          ? state.selectedModelId
+          : nextAuth.generationDefaults.defaultModelId || models[0]?.id || ''
+        return { auth: nextAuth, selectedModelId }
+      }),
 
       // Display preferences
       setTheme: (theme) => set({ theme }),
@@ -233,20 +241,14 @@ export const useStore = create<AppState>()(
       setSettings: (s) => set((st) => {
         return { settings: sanitizeClientSettings({ ...st.settings, clearInputAfterSubmit: s.clearInputAfterSubmit ?? st.settings.clearInputAfterSubmit }) }
       }),
-      dismissedCodexCliPrompts: [],
-      dismissCodexCliPrompt: (key) => set((st) => ({
-        dismissedCodexCliPrompts: st.dismissedCodexCliPrompts.includes(key)
-          ? st.dismissedCodexCliPrompts
-          : [...st.dismissedCodexCliPrompts, key],
-      })),
 
       // Input
       prompt: '',
       setPrompt: (prompt) => set({ prompt }),
       uploadToGallery: false,
       setUploadToGallery: (uploadToGallery) => set({ uploadToGallery }),
-      usePremiumApi: false,
-      setUsePremiumApi: (usePremiumApi) => set({ usePremiumApi }),
+      selectedModelId: '',
+      setSelectedModelId: (selectedModelId) => set({ selectedModelId }),
       inputImages: [],
       addInputImage: (img) =>
         set((s) => {
@@ -366,7 +368,6 @@ export const useStore = create<AppState>()(
         params: state.params,
         prompt: state.prompt,
         inputImages: state.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),
-        dismissedCodexCliPrompts: [],
         theme: state.theme,
         locale: state.locale,
         lastSeenLoginNoticeToken: state.lastSeenLoginNoticeToken,
@@ -383,11 +384,6 @@ function genId(): string {
   return Date.now().toString(36) + (++uid).toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
-export function getCodexCliPromptKey(settings: AppSettings): string {
-  const profile = getActiveApiProfile(settings)
-  return `${profile.baseUrl}\n${profile.apiKey}`
-}
-
 function isOpenAITask(task: TaskRecord) {
   return (task.apiProvider ?? 'openai') === 'openai'
 }
@@ -400,6 +396,25 @@ function getTaskUploadToGallery(task: TaskRecord) {
   if (typeof task.uploadToGallery === 'boolean') return task.uploadToGallery
   if (typeof task.privacyMode === 'boolean') return !task.privacyMode
   return false
+}
+
+function getAvailableModels() {
+  return useStore.getState().auth.generationDefaults.models
+}
+
+function getSelectedGenerationModel() {
+  const state = useStore.getState()
+  const models = state.auth.generationDefaults.models
+  return models.find((model) => model.id === state.selectedModelId) ??
+    models.find((model) => model.id === state.auth.generationDefaults.defaultModelId) ??
+    models[0] ??
+    null
+}
+
+function getTaskModelId(task?: Pick<TaskRecord, 'modelId'> | null) {
+  const models = getAvailableModels()
+  if (task?.modelId && models.some((model) => model.id === task.modelId)) return task.modelId
+  return useStore.getState().auth.generationDefaults.defaultModelId || models[0]?.id || ''
 }
 
 function isRunningOpenAITask(task: TaskRecord) {
@@ -453,25 +468,6 @@ export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Dat
   })
 
   return { tasks: updatedTasks, interruptedTasks }
-}
-
-export function showCodexCliPrompt(force = false, reason = '接口返回的提示词已被改写') {
-  const state = useStore.getState()
-  const settings = state.settings
-  const promptKey = getCodexCliPromptKey(settings)
-  if (!force && (settings.codexCli || state.dismissedCodexCliPrompts.includes(promptKey))) return
-
-  state.setConfirmDialog({
-    title: '检测到 Codex CLI API',
-    message: `${reason}，当前 API 来源很可能是 Codex CLI。\n\n是否开启 Codex CLI 兼容模式？开启后会禁用在此处无效的质量参数，并在 Images API 多图生成时使用并发请求，解决该 API 数量参数无效的问题。同时，提示词文本开头会加入简短的不改写要求，避免模型重写提示词，偏离原意。`,
-    confirmText: '开启',
-    action: () => {
-      const state = useStore.getState()
-      state.dismissCodexCliPrompt(promptKey)
-      state.setSettings({ codexCli: true })
-    },
-    cancelAction: () => useStore.getState().dismissCodexCliPrompt(promptKey),
-  })
 }
 
 function getFalRecoveryProfile(settings: AppSettings, task: TaskRecord) {
@@ -582,7 +578,6 @@ async function recoverFalTask(taskId: string) {
 export async function initStore() {
   useStore.setState({
     settings: sanitizeClientSettings(useStore.getState().settings),
-    dismissedCodexCliPrompts: [],
   })
   const storedTasks = await getAllTasks()
   const { tasks, interruptedTasks } = markInterruptedOpenAIRunningTasks(storedTasks)
@@ -666,10 +661,11 @@ async function finishTaskWithResult(
   if (!latestBeforeUpdate || !isTaskInFlight(latestBeforeUpdate)) return
   updateTaskInStore(taskId, {
     apiProvider: result.apiProvider ?? task.apiProvider,
+    modelId: result.modelId ?? task.modelId,
     apiProfileName: result.apiProfileName ?? task.apiProfileName,
     apiModel: result.apiModel ?? task.apiModel,
+    apiCodexCompatible: result.apiCodexCompatible ?? task.apiCodexCompatible,
     uploadToGallery: result.uploadToGallery ?? task.uploadToGallery,
-    usePremiumApi: result.usePremiumApi ?? task.usePremiumApi,
     privacyMode: result.privacyMode ?? task.privacyMode,
     chargedPoints: result.chargedPoints,
     refundedPoints: result.refundedPoints,
@@ -721,7 +717,7 @@ async function finishTaskWithResult(
 
 /** 提交新任务 */
 export async function submitTask(options: SubmitTaskOptions = {}) {
-  const { auth, settings, prompt, uploadToGallery, usePremiumApi, inputImages, maskDraft, params, showToast, setConfirmDialog } =
+  const { auth, settings, prompt, uploadToGallery, selectedModelId, inputImages, maskDraft, params, showToast, setConfirmDialog } =
     useStore.getState()
 
   if (!prompt.trim()) {
@@ -729,9 +725,13 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     return
   }
 
-  const costPerImage = usePremiumApi
-    ? auth.generationDefaults.premiumPointCost
-    : auth.generationDefaults.standardPointCost
+  const selectedModel = getSelectedGenerationModel()
+  if (!selectedModel) {
+    showToast('管理员尚未配置可用模型', 'error')
+    return
+  }
+
+  const costPerImage = auth.generationDefaults.standardPointCost
   const requiredPoints = costPerImage * Math.max(1, Math.floor(Number(params.n) || 1))
   const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
   if (pointsBalance != null && pointsBalance < requiredPoints) {
@@ -800,7 +800,7 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     await storeImage(img.dataUrl)
   }
 
-  const normalizedParams = normalizeParamsForSettings(params, settings)
+  const normalizedParams = normalizeParamsForSettings(params, selectedModel)
   const normalizedParamPatch = getChangedParams(params, normalizedParams)
   if (Object.keys(normalizedParamPatch).length) {
     useStore.getState().setParams(normalizedParamPatch)
@@ -812,10 +812,11 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     prompt: prompt.trim(),
     params: normalizedParams,
     apiProvider: 'openai',
-    apiProfileName: usePremiumApi ? '2K-4K 专用配置' : '统一配置',
-    apiModel: '服务端模型',
+    modelId: selectedModel.id,
+    apiProfileName: selectedModel.name,
+    apiModel: selectedModel.model,
+    apiCodexCompatible: selectedModel.codexCompatible,
     uploadToGallery,
-    usePremiumApi,
     privacyMode: !uploadToGallery,
     inputImageIds: orderedInputImages.map((i) => i.id),
     maskTargetImageId,
@@ -884,7 +885,7 @@ async function executeTask(taskId: string) {
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
       uploadToGallery: getTaskUploadToGallery(task),
-      usePremiumApi: Boolean(task.usePremiumApi),
+      modelId: getTaskModelId(task),
       privacyMode: task.privacyMode ?? !getTaskUploadToGallery(task),
       onFalRequestEnqueued: (request) => {
         falRequestInfo = request
@@ -994,22 +995,24 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
     return
   }
 
-  const normalizedParams = normalizeParamsForSettings(task.params, settings)
   const uploadToGallery = getTaskUploadToGallery(task)
-  const usePremiumApi = Boolean(task.usePremiumApi)
+  const modelId = getTaskModelId(task)
+  const selectedModel = getAvailableModels().find((model) => model.id === modelId)
+  const normalizedParams = normalizeParamsForSettings(task.params, selectedModel)
   const taskId = genId()
   const newTask: TaskRecord = {
     id: taskId,
     prompt: task.prompt,
     params: normalizedParams,
     apiProvider: 'openai',
-    apiProfileName: usePremiumApi ? '2K-4K 专用配置' : '统一配置',
-    apiModel: '服务端模型',
+    modelId,
+    apiProfileName: selectedModel?.name ?? task.apiProfileName ?? '默认模型',
+    apiModel: selectedModel?.model ?? task.apiModel ?? '服务端模型',
+    apiCodexCompatible: selectedModel?.codexCompatible ?? task.apiCodexCompatible,
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,
     uploadToGallery,
-    usePremiumApi,
     privacyMode: !uploadToGallery,
     outputImages: [],
     status: 'queued',
@@ -1031,11 +1034,13 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
 
 /** 复用配置 */
 export async function reuseConfig(task: TaskRecord) {
-  const { settings, setPrompt, setParams, setInputImages, setMaskDraft, clearMaskDraft, setUploadToGallery, setUsePremiumApi, showToast } = useStore.getState()
+  const { settings, setPrompt, setParams, setInputImages, setMaskDraft, clearMaskDraft, setUploadToGallery, setSelectedModelId, showToast } = useStore.getState()
   setPrompt(task.prompt)
-  setParams(normalizeParamsForSettings(task.params, settings))
   setUploadToGallery(getTaskUploadToGallery(task))
-  setUsePremiumApi(Boolean(task.usePremiumApi))
+  const modelId = getTaskModelId(task)
+  if (modelId) setSelectedModelId(modelId)
+  const selectedModel = getAvailableModels().find((model) => model.id === modelId)
+  setParams(normalizeParamsForSettings(task.params, selectedModel ?? settings))
 
   // 恢复输入图片
   const imgs: InputImage[] = []
@@ -1172,15 +1177,14 @@ export async function clearAllData() {
   await dbClearTasks()
   await clearImages()
   imageCache.clear()
-  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, setUploadToGallery, setUsePremiumApi, showToast } = useStore.getState()
+  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, setUploadToGallery, setSelectedModelId, showToast } = useStore.getState()
   setTasks([])
   clearInputImages()
-  useStore.setState({ dismissedCodexCliPrompts: [] })
   clearMaskDraft()
   setSettings({ ...DEFAULT_SETTINGS })
   setParams({ ...DEFAULT_PARAMS })
   setUploadToGallery(false)
-  setUsePremiumApi(false)
+  setSelectedModelId(useStore.getState().auth.generationDefaults.defaultModelId)
   showToast('所有数据已清空', 'success')
 }
 

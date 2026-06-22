@@ -68,8 +68,8 @@
 - **极致性能与隐私**：所有记录与图片均存放在浏览器 IndexedDB 中（采用 SHA-256 去重压缩），不经过任何第三方服务器。支持一键打包导出 ZIP 备份。
 
 ### 🔌 API 兼容增强
-- **Codex CLI 兼容模式**：专为非标准 API (如 Codex CLI) 打造。开启后自动固定无效参数，将 Images API 的多图请求拆分为并发单图。
-- **提示词防改写**：Responses API 会始终在请求文本前加入强制指令防止提示词被改写；开启 Codex CLI 模式后，Images API 也会获得同等保护。
+- **模型列表**：管理员可维护多个独立模型配置，普通用户可在生成栏直接选择模型。
+- **Codex 兼容模型**：模型标记为 Codex 兼容后，会禁用并省略尺寸、质量、格式、压缩率和审核参数。
 
 ---
 
@@ -188,31 +188,15 @@ npm run build
 
 ## 🛠️ API 配置与 URL 传参
 
-点击页面右上角的 **设置 (⚙️)**，可以配置模型、密钥与其他参数。
+管理员点击页面右上角的 **管理设置**，可以配置模型、密钥与其他参数。
 
 - **双接口模式**：支持 `Images API` (需填写 GPT Image 模型，如 `gpt-image-2`) 和 `Responses API` (需填写支持该工具的文本模型，如 `gpt-5.5`)。
-- **API 代理**：开启后，浏览器将请求同源的 `/api-proxy/` 路径，交由当前部署环境（Docker 或 本地开发）代理转发至真实 API，以绕开浏览器 CORS 限制。
-- **Codex CLI 模式**：如果你在使用源于 Codex CLI 的 API，可以在 `API URL` 右侧开启该模式。开启后会禁用不支持的 `quality` 参数，Images API 的多图生成也将改为并发单图请求。此外，提示词文本开头会加入简短的防改写指令，防止模型偏离原意。（注：Responses API 无论是否开启此模式，都会默认加入防改写指令）。
-- **智能诊断提示**：当应用检测到接口返回的提示词被强制改写，或缺少官方 API 常规返回的参数时，会主动提示你是否针对当前配置组合开启 Codex CLI 模式。
+- **独立模型配置**：每个模型可单独设置服务商、API URL、API Key、接口类型、超时和 Codex 兼容标记。
+- **Codex 兼容**：开启后前端禁用不支持的参数，服务端请求上游 API 时也会省略这些参数。
 
-### URL 传参快速填充
+### URL 传参
 
-应用支持通过 URL 查询参数快速填入配置，非常适合创建书签或集成分享：
-
-- `?apiUrl=https://你的代理地址.com`
-- `?apiKey=sk-xxxx`
-- `?apiMode=images` 或 `?apiMode=responses`（未传时默认为 `images`）
-- `?codexCli=true`（强制开启 Codex CLI 模式）
-
-例如，集成到 New API 的聊天系统：
-
-```text
-https://gpt-image-playground.cooksleep.dev?apiUrl={address}&apiKey={key}
-```
-
-```text
-https://cooksleep.github.io/gpt_image_playground?apiUrl={address}&apiKey={key}
-```
+API 密钥和模型配置由管理员在服务端统一管理，前端不会接受 URL 中的 API 配置参数。
 
 ---
 

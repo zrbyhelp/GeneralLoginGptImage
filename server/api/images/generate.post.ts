@@ -1,7 +1,7 @@
 import { createError } from 'h3'
 import type { TaskParams } from '../../../src/types'
 import { requireUser, isAdminUser } from '../../utils/auth'
-import { assertApiConfigUsable, getAdminSettings } from '../../utils/admin-settings'
+import { assertApiConfigUsable, getAdminSettings, selectGenerationModel } from '../../utils/admin-settings'
 import { countRecentGeneratedImages } from '../../utils/generation-usage'
 import { createImageGenerationJob } from '../../utils/image-generation-queue'
 
@@ -27,6 +27,7 @@ const FORBIDDEN_API_KEYS = new Set([
   'profiles',
   'activeProfileId',
   'timeout',
+  'usePremiumApi',
 ])
 
 const ALLOWED_PARAM_KEYS = new Set(['size', 'quality', 'output_format', 'output_compression', 'moderation', 'n'])
@@ -39,7 +40,7 @@ function assertNoApiOverrides(record: Record<string, unknown>, label = '请求')
   }
 }
 
-function normalizeParams(input: unknown, provider: string): TaskParams {
+function normalizeParams(input: unknown, provider: string, codexCompatible: boolean): TaskParams {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   assertNoApiOverrides(record, '参数')
   for (const key of Object.keys(record)) {
@@ -64,10 +65,10 @@ function normalizeParams(input: unknown, provider: string): TaskParams {
 
   return {
     size: typeof record.size === 'string' && record.size.trim() ? record.size.trim() : DEFAULT_PARAMS.size,
-    quality,
-    output_format: outputFormat,
-    output_compression: outputFormat === 'png' ? null : compression,
-    moderation,
+    quality: codexCompatible ? DEFAULT_PARAMS.quality : quality,
+    output_format: codexCompatible ? DEFAULT_PARAMS.output_format : outputFormat,
+    output_compression: codexCompatible || outputFormat === 'png' ? null : compression,
+    moderation: codexCompatible ? DEFAULT_PARAMS.moderation : moderation,
     n,
   }
 }
@@ -93,12 +94,11 @@ export default defineEventHandler(async (event) => {
 
   const settings = await getAdminSettings()
   const uploadToGallery = body.uploadToGallery === true || body.privacyMode === false
-  const usePremiumApi = body.usePremiumApi === true
   const privacyMode = !uploadToGallery
-  const apiConfig = usePremiumApi ? settings.premiumApiConfig : settings.apiConfig
-  const params = normalizeParams(body.params, apiConfig.provider)
-  const costPerImage = usePremiumApi ? settings.premiumPointCost : settings.standardPointCost
-  assertApiConfigUsable(apiConfig, usePremiumApi ? '2K-4K 专用 API' : 'API')
+  const apiConfig = selectGenerationModel(settings, body.modelId)
+  const params = normalizeParams(body.params, apiConfig.provider, apiConfig.codexCompatible)
+  const costPerImage = settings.standardPointCost
+  assertApiConfigUsable(apiConfig, apiConfig.name || 'API')
 
   if (!isAdmin) {
     const hourlyImageLimit = privacyMode ? settings.privacyHourlyImageLimit : settings.hourlyImageLimit
@@ -118,7 +118,6 @@ export default defineEventHandler(async (event) => {
     isAdmin,
     settings,
     apiConfig,
-    usePremiumApi,
     prompt,
     params,
     inputImageDataUrls,

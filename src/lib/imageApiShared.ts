@@ -17,7 +17,7 @@ export interface CallApiOptions {
   inputImageDataUrls: string[]
   maskDataUrl?: string
   uploadToGallery?: boolean
-  usePremiumApi?: boolean
+  modelId?: string
   /** 旧字段：true 表示跳过第三方图集上传 */
   privacyMode?: boolean
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
@@ -35,10 +35,14 @@ export interface CallApiResult {
   revisedPrompts?: Array<string | undefined>
   /** 服务端统一配置实际使用的 Provider */
   apiProvider?: ApiProvider
+  /** 服务端实际使用的模型配置 ID */
+  modelId?: string
   /** 服务端统一配置显示名称 */
   apiProfileName?: string
   /** 服务端统一配置实际使用的模型 */
   apiModel?: string
+  /** 服务端实际使用的模型是否为 Codex 兼容 */
+  apiCodexCompatible?: boolean
   /** 生成成功但第三方图集上传失败时的提示 */
   galleryUploadError?: string | null
   /** 多图生成部分失败时的错误摘要；成功图片仍会正常返回。 */
@@ -47,8 +51,6 @@ export interface CallApiResult {
   privacyMode?: boolean
   /** 服务端确认的图集上传状态 */
   uploadToGallery?: boolean
-  /** 是否使用 2K-4K 专用 API */
-  usePremiumApi?: boolean
   /** 实际扣除的积分 */
   chargedPoints?: number
   /** 实际退款的积分 */

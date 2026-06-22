@@ -3,6 +3,28 @@
 export type ApiMode = 'images' | 'responses'
 export type ApiProvider = 'openai' | 'fal'
 
+export interface AdminModelConfig {
+  id: string
+  name: string
+  provider: ApiProvider
+  baseUrl: string
+  apiKey: string
+  model: string
+  timeout: number
+  apiMode: ApiMode
+  codexCompatible: boolean
+  enabled: boolean
+}
+
+export interface PublicGenerationModel {
+  id: string
+  name: string
+  provider: ApiProvider
+  model: string
+  apiMode: ApiMode
+  codexCompatible: boolean
+}
+
 export interface ApiProfile {
   id: string
   name: string
@@ -75,10 +97,14 @@ export interface TaskRecord {
   params: TaskParams
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider
+  /** 生成时选择的管理员模型配置 ID */
+  modelId?: string
   /** 生成时使用的 Provider 名称 */
   apiProfileName?: string
   /** 生成时使用的模型 ID */
   apiModel?: string
+  /** 生成时使用的模型是否为 Codex 兼容 */
+  apiCodexCompatible?: boolean
   /** fal.ai 队列请求 ID，用于连接断开后的结果恢复 */
   falRequestId?: string
   /** fal.ai 队列 endpoint，用于连接断开后的状态和结果查询 */
@@ -95,7 +121,7 @@ export interface TaskRecord {
   queueTotalImages?: number
   /** 是否上传第三方图集 */
   uploadToGallery?: boolean
-  /** 是否使用 2K-4K 专用 API 和高档位积分 */
+  /** 旧字段：是否使用 2K-4K 专用 API 和高档位积分 */
   usePremiumApi?: boolean
   /** 旧字段：true 表示跳过第三方图集上传 */
   privacyMode?: boolean

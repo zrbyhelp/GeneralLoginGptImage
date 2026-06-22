@@ -1,32 +1,13 @@
 import { useEffect, useState } from 'react'
+import type { AdminModelConfig, ApiMode, ApiProvider } from '../types'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
-type ApiProvider = 'openai' | 'fal'
-type ApiMode = 'images' | 'responses'
-
 type AdminSettings = {
-  apiConfig: {
-    provider: ApiProvider
-    baseUrl: string
-    apiKey: string
-    model: string
-    timeout: number
-    apiMode: ApiMode
-    codexCli: boolean
-  }
-  premiumApiConfig: {
-    provider: ApiProvider
-    baseUrl: string
-    apiKey: string
-    model: string
-    timeout: number
-    apiMode: ApiMode
-    codexCli: boolean
-  }
+  models: AdminModelConfig[]
+  defaultModelId: string
   dailyPointsTarget: number
   standardPointCost: number
-  premiumPointCost: number
   galleryUploadDefault: boolean
   hourlyImageLimit: number
   privacyHourlyImageLimit: number
@@ -37,28 +18,24 @@ type AdminSettings = {
   updatedAt: string | null
 }
 
+const DEFAULT_MODEL: AdminModelConfig = {
+  id: 'default-model',
+  name: '默认模型',
+  provider: 'openai',
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: '',
+  model: 'gpt-image-2',
+  timeout: 600,
+  apiMode: 'images',
+  codexCompatible: false,
+  enabled: true,
+}
+
 const DEFAULT_SETTINGS: AdminSettings = {
-  apiConfig: {
-    provider: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: 'gpt-image-2',
-    timeout: 600,
-    apiMode: 'images',
-    codexCli: false,
-  },
-  premiumApiConfig: {
-    provider: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: 'gpt-image-2',
-    timeout: 600,
-    apiMode: 'images',
-    codexCli: false,
-  },
+  models: [DEFAULT_MODEL],
+  defaultModelId: DEFAULT_MODEL.id,
   dailyPointsTarget: 100,
   standardPointCost: 1,
-  premiumPointCost: 300,
   galleryUploadDefault: false,
   hourlyImageLimit: 20,
   privacyHourlyImageLimit: 5,
@@ -67,6 +44,29 @@ const DEFAULT_SETTINGS: AdminSettings = {
   galleryUploadUrl: 'https://imglist.zrbyhelp.com/api/uploads/third-party',
   galleryUploadToken: '',
   updatedAt: null,
+}
+
+function createModel(): AdminModelConfig {
+  return {
+    ...DEFAULT_MODEL,
+    id: `model-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    name: '新模型',
+  }
+}
+
+function patchModel(models: AdminModelConfig[], id: string, patch: Partial<AdminModelConfig>) {
+  return models.map((model) => {
+    if (model.id !== id) return model
+    const provider = patch.provider ?? model.provider
+    return {
+      ...model,
+      ...patch,
+      apiMode: provider === 'fal' ? 'images' : patch.apiMode ?? model.apiMode,
+      codexCompatible: provider === 'openai' ? patch.codexCompatible ?? model.codexCompatible : false,
+      baseUrl: patch.provider === 'fal' ? 'https://fal.run' : patch.baseUrl ?? model.baseUrl,
+      model: patch.provider === 'fal' && !model.model.trim() ? 'openai/gpt-image-2' : patch.model ?? model.model,
+    }
+  })
 }
 
 export default function AdminAuditModal() {
@@ -140,10 +140,7 @@ export default function AdminAuditModal() {
       const response = await fetch('/api/admin/redeem-codes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          count: redeemCount,
-          pointsPerCode: redeemPoints,
-        }),
+        body: JSON.stringify({ count: redeemCount, pointsPerCode: redeemPoints }),
       })
       if (!response.ok) throw new Error(await getResponseErrorMessage(response))
       const text = await response.text()
@@ -162,12 +159,47 @@ export default function AdminAuditModal() {
     }
   }
 
+  function updateModel(id: string, patch: Partial<AdminModelConfig>) {
+    setSettings((prev) => {
+      const models = patchModel(prev.models, id, patch)
+      const defaultModel = models.find((model) => model.id === prev.defaultModelId)
+      return {
+        ...prev,
+        models,
+        defaultModelId: defaultModel?.enabled
+          ? prev.defaultModelId
+          : models.find((model) => model.enabled)?.id ?? models[0].id,
+      }
+    })
+  }
+
+  function addModel() {
+    const model = createModel()
+    setSettings((prev) => ({
+      ...prev,
+      models: [...prev.models, model],
+      defaultModelId: prev.defaultModelId || model.id,
+    }))
+  }
+
+  function removeModel(id: string) {
+    setSettings((prev) => {
+      if (prev.models.length <= 1) return prev
+      const models = prev.models.filter((model) => model.id !== id)
+      return {
+        ...prev,
+        models,
+        defaultModelId: prev.defaultModelId === id ? models.find((model) => model.enabled)?.id ?? models[0].id : prev.defaultModelId,
+      }
+    })
+  }
+
   if (!showAdminAudit) return null
 
   return (
     <div data-no-drag-select className="fixed inset-0 z-[75] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in dark:bg-black/50" onClick={() => setShowAdminAudit(false)} />
-      <div className="relative z-10 flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
+      <div className="relative z-10 flex max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-white/[0.08]">
           <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">管理设置</h3>
           <button
@@ -182,356 +214,159 @@ export default function AdminAuditModal() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务商类型</span>
-              <select
-                value={settings.apiConfig.provider}
-                onChange={(event) => setSettings((prev) => ({
-                  ...prev,
-                  apiConfig: {
-                    ...prev.apiConfig,
-                    provider: event.target.value as ApiProvider,
-                    apiMode: event.target.value === 'fal' ? 'images' : prev.apiConfig.apiMode,
-                    codexCli: event.target.value === 'openai' ? prev.apiConfig.codexCli : false,
-                  },
-                }))}
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              >
-                <option value="openai">OpenAI 兼容接口</option>
-                <option value="fal">fal.ai</option>
-              </select>
-            </label>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block">
               <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每小时每用户最多生成图片数</span>
-              <input
-                value={settings.hourlyImageLimit}
-                onChange={(event) => setSettings((prev) => ({ ...prev, hourlyImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
-                min={1}
-                max={1000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
+              <input value={settings.hourlyImageLimit} onChange={(event) => setSettings((prev) => ({ ...prev, hourlyImageLimit: Math.max(1, Number(event.target.value) || 1) }))} min={1} max={1000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">关闭图集上传时每小时最多生成图片数</span>
-              <input
-                value={settings.privacyHourlyImageLimit}
-                onChange={(event) => setSettings((prev) => ({ ...prev, privacyHourlyImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
-                min={1}
-                max={1000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
+              <input value={settings.privacyHourlyImageLimit} onChange={(event) => setSettings((prev) => ({ ...prev, privacyHourlyImageLimit: Math.max(1, Number(event.target.value) || 1) }))} min={1} max={1000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">全服务同时生成图片数</span>
-              <input
-                value={settings.serviceConcurrentImageLimit}
-                onChange={(event) => setSettings((prev) => ({ ...prev, serviceConcurrentImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
-                min={1}
-                max={1000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
+              <input value={settings.serviceConcurrentImageLimit} onChange={(event) => setSettings((prev) => ({ ...prev, serviceConcurrentImageLimit: Math.max(1, Number(event.target.value) || 1) }))} min={1} max={1000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">单账号同时生成图片数</span>
-              <input
-                value={settings.userConcurrentImageLimit}
-                onChange={(event) => setSettings((prev) => ({ ...prev, userConcurrentImageLimit: Math.max(1, Number(event.target.value) || 1) }))}
-                min={1}
-                max={1000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
+              <input value={settings.userConcurrentImageLimit} onChange={(event) => setSettings((prev) => ({ ...prev, userConcurrentImageLimit: Math.max(1, Number(event.target.value) || 1) }))} min={1} max={1000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每日补满积分</span>
-              <input
-                value={settings.dailyPointsTarget}
-                onChange={(event) => setSettings((prev) => ({ ...prev, dailyPointsTarget: Math.max(1, Number(event.target.value) || 100) }))}
-                min={1}
-                max={1000000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
+              <input value={settings.dailyPointsTarget} onChange={(event) => setSettings((prev) => ({ ...prev, dailyPointsTarget: Math.max(1, Number(event.target.value) || 100) }))} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">1K 档单张消耗</span>
-              <input
-                value={settings.standardPointCost}
-                onChange={(event) => setSettings((prev) => ({ ...prev, standardPointCost: Math.max(1, Number(event.target.value) || 1) }))}
-                min={1}
-                max={1000000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">2K-4K 档单张消耗</span>
-              <input
-                value={settings.premiumPointCost}
-                onChange={(event) => setSettings((prev) => ({ ...prev, premiumPointCost: Math.max(1, Number(event.target.value) || 300) }))}
-                min={1}
-                max={1000000}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">单张消耗</span>
+              <input value={settings.standardPointCost} onChange={(event) => setSettings((prev) => ({ ...prev, standardPointCost: Math.max(1, Number(event.target.value) || 1) }))} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
             </label>
             <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/70 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
               <span className="text-sm text-gray-600 dark:text-gray-300">默认上传图集</span>
-              <button
-                type="button"
-                onClick={() => setSettings((prev) => ({ ...prev, galleryUploadDefault: !prev.galleryUploadDefault }))}
-                className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${settings.galleryUploadDefault ? 'bg-blue-500' : 'bg-gray-300'}`}
-              >
+              <button type="button" onClick={() => setSettings((prev) => ({ ...prev, galleryUploadDefault: !prev.galleryUploadDefault }))} className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${settings.galleryUploadDefault ? 'bg-blue-500' : 'bg-gray-300'}`}>
                 <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${settings.galleryUploadDefault ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
               </button>
             </div>
-            {settings.apiConfig.provider === 'openai' && (
-              <label className="block sm:col-span-2">
-                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
-                <input
-                  value={settings.apiConfig.baseUrl}
-                  onChange={(event) => setSettings((prev) => ({ ...prev, apiConfig: { ...prev.apiConfig, baseUrl: event.target.value } }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                />
-              </label>
-            )}
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API Key</span>
-              <input
-                value={settings.apiConfig.apiKey}
-                onChange={(event) => setSettings((prev) => ({ ...prev, apiConfig: { ...prev.apiConfig, apiKey: event.target.value } }))}
-                type="password"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">模型 ID</span>
-              <input
-                value={settings.apiConfig.model}
-                onChange={(event) => setSettings((prev) => ({ ...prev, apiConfig: { ...prev.apiConfig, model: event.target.value } }))}
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
-            </label>
-            {settings.apiConfig.provider === 'openai' && (
-              <label className="block">
-                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API 接口</span>
-                <select
-                  value={settings.apiConfig.apiMode}
-                  onChange={(event) => setSettings((prev) => ({ ...prev, apiConfig: { ...prev.apiConfig, apiMode: event.target.value as ApiMode } }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                >
-                  <option value="images">Images API</option>
-                  <option value="responses">Responses API</option>
-                </select>
-              </label>
-            )}
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">请求超时 (秒)</span>
-              <input
-                value={settings.apiConfig.timeout}
-                onChange={(event) => setSettings((prev) => ({ ...prev, apiConfig: { ...prev.apiConfig, timeout: Math.max(10, Number(event.target.value) || 600) } }))}
-                min={10}
-                max={3600}
-                type="number"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
-            </label>
-            <div className="sm:col-span-2 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">2K-4K 专用 API</span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">开启后按高档位消耗积分</span>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务商类型</span>
-                  <select
-                    value={settings.premiumApiConfig.provider}
-                    onChange={(event) => setSettings((prev) => ({
-                      ...prev,
-                      premiumApiConfig: {
-                        ...prev.premiumApiConfig,
-                        provider: event.target.value as ApiProvider,
-                        apiMode: event.target.value === 'fal' ? 'images' : prev.premiumApiConfig.apiMode,
-                        codexCli: event.target.value === 'openai' ? prev.premiumApiConfig.codexCli : false,
-                      },
-                    }))}
-                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                  >
-                    <option value="openai">OpenAI 兼容接口</option>
-                    <option value="fal">fal.ai</option>
-                  </select>
-                </label>
-                {settings.premiumApiConfig.provider === 'openai' && (
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
-                    <input
-                      value={settings.premiumApiConfig.baseUrl}
-                      onChange={(event) => setSettings((prev) => ({
-                        ...prev,
-                        premiumApiConfig: { ...prev.premiumApiConfig, baseUrl: event.target.value },
-                      }))}
-                      className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                    />
-                  </label>
-                )}
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API Key</span>
-                  <input
-                    value={settings.premiumApiConfig.apiKey}
-                    onChange={(event) => setSettings((prev) => ({
-                      ...prev,
-                      premiumApiConfig: { ...prev.premiumApiConfig, apiKey: event.target.value },
-                    }))}
-                    type="password"
-                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">模型 ID</span>
-                  <input
-                    value={settings.premiumApiConfig.model}
-                    onChange={(event) => setSettings((prev) => ({
-                      ...prev,
-                      premiumApiConfig: { ...prev.premiumApiConfig, model: event.target.value },
-                    }))}
-                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                  />
-                </label>
-                {settings.premiumApiConfig.provider === 'openai' && (
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API 接口</span>
-                    <select
-                      value={settings.premiumApiConfig.apiMode}
-                      onChange={(event) => setSettings((prev) => ({
-                        ...prev,
-                        premiumApiConfig: { ...prev.premiumApiConfig, apiMode: event.target.value as ApiMode },
-                      }))}
-                      className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                    >
-                      <option value="images">Images API</option>
-                      <option value="responses">Responses API</option>
-                    </select>
-                  </label>
-                )}
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">请求超时 (秒)</span>
-                  <input
-                    value={settings.premiumApiConfig.timeout}
-                    onChange={(event) => setSettings((prev) => ({
-                      ...prev,
-                      premiumApiConfig: { ...prev.premiumApiConfig, timeout: Math.max(10, Number(event.target.value) || 600) },
-                    }))}
-                    min={10}
-                    max={3600}
-                    type="number"
-                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                  />
-                </label>
-                {settings.premiumApiConfig.provider === 'openai' && (
-                  <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/70 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
-                    <span className="text-sm text-gray-600 dark:text-gray-300">Codex CLI 兼容模式</span>
-                    <button
-                      type="button"
-                      onClick={() => setSettings((prev) => ({
-                        ...prev,
-                        premiumApiConfig: {
-                          ...prev.premiumApiConfig,
-                          codexCli: !prev.premiumApiConfig.codexCli,
-                        },
-                      }))}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${settings.premiumApiConfig.codexCli ? 'bg-blue-500' : 'bg-gray-300'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${settings.premiumApiConfig.codexCli ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <label className="block sm:col-span-2">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">图集上传 URL</span>
-              <input
-                value={settings.galleryUploadUrl}
-                onChange={(event) => setSettings((prev) => ({ ...prev, galleryUploadUrl: event.target.value }))}
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
-            </label>
-            <label className="block sm:col-span-2">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">图集上传 Token</span>
-              <input
-                value={settings.galleryUploadToken}
-                onChange={(event) => setSettings((prev) => ({ ...prev, galleryUploadToken: event.target.value }))}
-                type="password"
-                className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-              />
-            </label>
-            {settings.apiConfig.provider === 'openai' && (
-              <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/70 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
-                <span className="text-sm text-gray-600 dark:text-gray-300">Codex CLI 兼容模式</span>
-                <button
-                  type="button"
-                  onClick={() => setSettings((prev) => ({ ...prev, apiConfig: { ...prev.apiConfig, codexCli: !prev.apiConfig.codexCli } }))}
-                  className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${settings.apiConfig.codexCli ? 'bg-blue-500' : 'bg-gray-300'}`}
-                >
-                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${settings.apiConfig.codexCli ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-            )}
           </div>
+
           <section className="mt-6 border-t border-gray-100 pt-5 dark:border-white/[0.08]">
-            <h4 className="mb-4 flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-200">
-              <svg className="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h10" />
-              </svg>
-              兑换码发放
-            </h4>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">模型列表</h4>
+              <button type="button" onClick={addModel} className="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">
+                添加模型
+              </button>
+            </div>
+            <div className="space-y-4">
+              {settings.models.map((model, index) => (
+                <div key={model.id} className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 shadow-sm dark:bg-white/[0.06] dark:text-gray-300">#{index + 1}</span>
+                      <button type="button" onClick={() => model.enabled && setSettings((prev) => ({ ...prev, defaultModelId: model.id }))} disabled={!model.enabled} className={`rounded-full px-2 py-0.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed ${settings.defaultModelId === model.id ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 dark:bg-white/[0.06] dark:text-gray-300'}`}>
+                        默认
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => updateModel(model.id, { enabled: !model.enabled })} className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${model.enabled ? 'bg-blue-500' : 'bg-gray-300'}`} aria-label="启用模型">
+                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${model.enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                      </button>
+                      <button type="button" onClick={() => removeModel(model.id)} disabled={settings.models.length <= 1} className="rounded-lg px-2 py-1 text-xs text-red-500 transition hover:bg-red-50 disabled:opacity-40 dark:hover:bg-red-500/10">
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">名称</span>
+                      <input value={model.name} onChange={(event) => updateModel(model.id, { name: event.target.value })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务商类型</span>
+                      <select value={model.provider} onChange={(event) => updateModel(model.id, { provider: event.target.value as ApiProvider })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100">
+                        <option value="openai">OpenAI 兼容接口</option>
+                        <option value="fal">fal.ai</option>
+                      </select>
+                    </label>
+                    {model.provider === 'openai' && (
+                      <label className="block">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
+                        <input value={model.baseUrl} onChange={(event) => updateModel(model.id, { baseUrl: event.target.value })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                      </label>
+                    )}
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API Key</span>
+                      <input value={model.apiKey} onChange={(event) => updateModel(model.id, { apiKey: event.target.value })} type="password" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">模型 ID</span>
+                      <input value={model.model} onChange={(event) => updateModel(model.id, { model: event.target.value })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                    </label>
+                    {model.provider === 'openai' && (
+                      <label className="block">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API 接口</span>
+                        <select value={model.apiMode} onChange={(event) => updateModel(model.id, { apiMode: event.target.value as ApiMode })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100">
+                          <option value="images">Images API</option>
+                          <option value="responses">Responses API</option>
+                        </select>
+                      </label>
+                    )}
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">请求超时 (秒)</span>
+                      <input value={model.timeout} onChange={(event) => updateModel(model.id, { timeout: Math.max(10, Number(event.target.value) || 600) })} min={10} max={3600} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                    </label>
+                    {model.provider === 'openai' && (
+                      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/70 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                        <span className="text-sm text-gray-600 dark:text-gray-300">Codex 兼容</span>
+                        <button type="button" onClick={() => updateModel(model.id, { codexCompatible: !model.codexCompatible })} className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${model.codexCompatible ? 'bg-blue-500' : 'bg-gray-300'}`}>
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${model.codexCompatible ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-6 border-t border-gray-100 pt-5 dark:border-white/[0.08]">
+            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200">图集上传</h4>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">图集上传 URL</span>
+                <input value={settings.galleryUploadUrl} onChange={(event) => setSettings((prev) => ({ ...prev, galleryUploadUrl: event.target.value }))} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">图集上传 Token</span>
+                <input value={settings.galleryUploadToken} onChange={(event) => setSettings((prev) => ({ ...prev, galleryUploadToken: event.target.value }))} type="password" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+              </label>
+            </div>
+          </section>
+
+          <section className="mt-6 border-t border-gray-100 pt-5 dark:border-white/[0.08]">
+            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200">兑换码发放</h4>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">发放数量</span>
-                <input
-                  value={redeemCount}
-                  onChange={(event) => setRedeemCount(Math.max(1, Number(event.target.value) || 1))}
-                  min={1}
-                  max={1000}
-                  type="number"
-                  className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                />
+                <input value={redeemCount} onChange={(event) => setRedeemCount(Math.max(1, Number(event.target.value) || 1))} min={1} max={1000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每个可兑换积分</span>
-                <input
-                  value={redeemPoints}
-                  onChange={(event) => setRedeemPoints(Math.max(1, Number(event.target.value) || 1))}
-                  min={1}
-                  max={1000000}
-                  type="number"
-                  className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                />
+                <input value={redeemPoints} onChange={(event) => setRedeemPoints(Math.max(1, Number(event.target.value) || 1))} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
               </label>
             </div>
             <div className="mt-3 flex justify-end">
-              <button
-                type="button"
-                onClick={() => void issueRedeemCodes()}
-                disabled={redeemLoading}
-                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50"
-              >
-                {redeemLoading ? '生成中...' : '生成并下载 TXT'}
+              <button type="button" onClick={() => void issueRedeemCodes()} disabled={redeemLoading} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">
+                {redeemLoading ? '生成中...' : '生成兑换码'}
               </button>
             </div>
           </section>
-          <div className="mt-5 flex justify-end">
-            <button
-              disabled={saving}
-              onClick={() => void saveSettings()}
-              className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600 disabled:opacity-50"
-            >
-              {saving ? '保存中...' : '保存设置'}
-            </button>
-          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-4 dark:border-white/[0.08]">
+          <button type="button" onClick={() => setShowAdminAudit(false)} className="rounded-xl bg-gray-100 px-4 py-2 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]">
+            取消
+          </button>
+          <button type="button" onClick={() => void saveSettings()} disabled={saving} className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600 disabled:opacity-50">
+            {saving ? '保存中...' : '保存设置'}
+          </button>
         </div>
       </div>
     </div>
