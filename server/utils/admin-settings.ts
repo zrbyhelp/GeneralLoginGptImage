@@ -1,6 +1,7 @@
 import type { AdminModelConfig, ApiMode, ApiProvider, PublicGenerationModel } from '../../src/types'
 import { createError } from 'h3'
-import { normalizePricingMode, normalizeTieredPricingRules } from '../../src/lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, normalizePricingMode, normalizeTieredPricingRules } from '../../src/lib/pricing'
+import { DEFAULT_GEMINI_BASE_URL, DEFAULT_GEMINI_MODEL, normalizeGeminiAdminDefaults } from '../../src/lib/gemini'
 import { getDb } from './db'
 
 export type ServerApiConfig = Omit<AdminModelConfig, 'enabled'>
@@ -53,10 +54,13 @@ interface AdminSettingsRow {
 }
 
 function parseProvider(value: unknown): ApiProvider {
-  return value === 'fal' ? 'fal' : 'openai'
+  if (value === 'fal') return 'fal'
+  if (value === 'google-gemini') return 'google-gemini'
+  return 'openai'
 }
 
 function parseApiMode(value: unknown): ApiMode {
+  if (value === 'generateContent') return 'generateContent'
   return value === 'responses' ? 'responses' : 'images'
 }
 
@@ -77,19 +81,34 @@ function createModelId(prefix = 'model') {
 
 function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: ApiProvider }): ServerApiConfig {
   const provider = parseProvider(defaults.provider)
-  const fallbackModel = provider === 'fal' ? 'openai/gpt-image-2' : 'gpt-image-2'
+  const fallbackModel = provider === 'fal'
+    ? 'openai/gpt-image-2'
+    : provider === 'google-gemini'
+      ? DEFAULT_GEMINI_MODEL
+      : 'gpt-image-2'
+  const fallbackBaseUrl = provider === 'fal'
+    ? 'https://fal.run'
+    : provider === 'google-gemini'
+      ? DEFAULT_GEMINI_BASE_URL
+      : 'https://api.openai.com/v1'
+  const pricingRules = defaults.pricingRules ??
+    (provider === 'google-gemini' ? DEFAULT_GEMINI_TIERED_PRICING_RULES : undefined)
   return {
     id: typeof defaults.id === 'string' && defaults.id.trim() ? defaults.id : createModelId(provider),
     name: typeof defaults.name === 'string' && defaults.name.trim() ? defaults.name.trim() : '默认模型',
     provider,
-    baseUrl: String(defaults.baseUrl || (provider === 'fal' ? 'https://fal.run' : 'https://api.openai.com/v1')).trim(),
+    baseUrl: String(defaults.baseUrl || fallbackBaseUrl).trim(),
     apiKey: String(defaults.apiKey || ''),
     model: String(defaults.model || fallbackModel).trim() || fallbackModel,
     timeout: parsePositiveInt(defaults.timeout, 600, 10, 3600),
-    apiMode: provider === 'fal' ? 'images' : parseApiMode(defaults.apiMode),
+    apiMode: provider === 'fal' ? 'images' : provider === 'google-gemini' ? 'generateContent' : parseApiMode(defaults.apiMode),
     codexCompatible: provider === 'openai' ? Boolean(defaults.codexCompatible) : false,
-    pricingMode: normalizePricingMode(defaults.pricingMode),
-    pricingRules: normalizeTieredPricingRules(defaults.pricingRules),
+    geminiDefaults: provider === 'google-gemini' ? normalizeGeminiAdminDefaults(defaults.geminiDefaults) : undefined,
+    pricingMode: provider === 'google-gemini' && defaults.pricingMode === undefined ? 'tiered' : normalizePricingMode(defaults.pricingMode),
+    pricingRules: normalizeTieredPricingRules(
+      pricingRules,
+      provider === 'google-gemini' ? DEFAULT_GEMINI_TIERED_PRICING_RULES : undefined,
+    ),
   }
 }
 
@@ -157,6 +176,7 @@ function normalizeModels(input: unknown, fallbackModels: AdminModelConfig[]): Ad
       timeout: typeof record.timeout === 'number' ? record.timeout : undefined,
       apiMode: record.apiMode,
       codexCompatible: Boolean(record.codexCompatible ?? record.codexCli),
+      geminiDefaults: record.geminiDefaults,
       enabled: typeof record.enabled === 'boolean' ? record.enabled : true,
       pricingMode: record.pricingMode,
       pricingRules: record.pricingRules,
@@ -387,7 +407,7 @@ export async function updateAdminSettings(patch: AdminSettingsPatch) {
 }
 
 export function assertApiConfigUsable(config: ServerApiConfig, label = 'API') {
-  if (config.provider === 'openai' && !config.baseUrl.trim()) {
+  if ((config.provider === 'openai' || config.provider === 'google-gemini') && !config.baseUrl.trim()) {
     throw createError({ statusCode: 500, statusMessage: `管理员尚未配置 ${label} URL` })
   }
   if (!config.apiKey.trim()) {

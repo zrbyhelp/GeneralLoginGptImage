@@ -161,7 +161,13 @@ export default function DetailModal() {
   const showRevisedPrompt = Boolean(currentRevisedPrompt && currentRevisedPrompt !== task.prompt.trim())
   const aggregateActualParams = outputLen > 0 ? { ...task.actualParams, n: outputLen } : task.actualParams
   const taskProvider = task.apiProvider
-  const taskProviderName = taskProvider === 'fal' ? 'fal.ai' : taskProvider ? 'OpenAI' : '未知'
+  const taskProviderName = taskProvider === 'fal'
+    ? 'fal.ai'
+    : taskProvider === 'google-gemini'
+      ? 'Google Gemini'
+      : taskProvider
+        ? 'OpenAI'
+        : '未知'
   const taskProfileName = task.apiProfileName || '未知'
   const taskModel = task.apiModel || '未知'
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
@@ -587,37 +593,69 @@ export default function DetailModal() {
               </div>
             )}
             <div className="grid grid-cols-2 gap-2 text-xs mb-4">
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                <span className="text-gray-400 dark:text-gray-500">尺寸</span>
-                <br />
-                <DetailParamValue task={task} paramKey="size" className="font-medium" actualParams={currentActualParams} />
-              </div>
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                <span className="text-gray-400 dark:text-gray-500">质量</span>
-                <br />
-                <DetailParamValue task={task} paramKey="quality" className="font-medium" actualParams={currentActualParams} />
-              </div>
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                <span className="text-gray-400 dark:text-gray-500">格式</span>
-                <br />
-                <DetailParamValue task={task} paramKey="output_format" className="font-medium" actualParams={currentActualParams} />
-              </div>
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                <span className="text-gray-400 dark:text-gray-500">审核</span>
-                <br />
-                <DetailParamValue task={task} paramKey="moderation" className="font-medium" actualParams={currentActualParams} />
-              </div>
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                <span className="text-gray-400 dark:text-gray-500">数量</span>
-                <br />
-                <DetailParamValue task={task} paramKey="n" className="font-medium" actualParams={aggregateActualParams} />
-              </div>
-              {task.params.output_compression != null && (
-                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                  <span className="text-gray-400 dark:text-gray-500">压缩率</span>
-                  <br />
-                  <DetailParamValue task={task} paramKey="output_compression" className="font-medium" actualParams={currentActualParams} />
-                </div>
+              {taskProvider === 'google-gemini' ? (
+                <>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">媒体精度</span>
+                    <br />
+                    <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.mediaResolution ?? 'auto'}</span>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">创造性</span>
+                    <br />
+                    <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.temperature ?? '自动'}</span>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">思考</span>
+                    <br />
+                    <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.thinkingMode ?? 'auto'}</span>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">安全</span>
+                    <br />
+                    <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.safetyLevel ?? 'default'}</span>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">数量</span>
+                    <br />
+                    <DetailParamValue task={task} paramKey="n" className="font-medium" actualParams={aggregateActualParams} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">尺寸</span>
+                    <br />
+                    <DetailParamValue task={task} paramKey="size" className="font-medium" actualParams={currentActualParams} />
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">质量</span>
+                    <br />
+                    <DetailParamValue task={task} paramKey="quality" className="font-medium" actualParams={currentActualParams} />
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">格式</span>
+                    <br />
+                    <DetailParamValue task={task} paramKey="output_format" className="font-medium" actualParams={currentActualParams} />
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">审核</span>
+                    <br />
+                    <DetailParamValue task={task} paramKey="moderation" className="font-medium" actualParams={currentActualParams} />
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">数量</span>
+                    <br />
+                    <DetailParamValue task={task} paramKey="n" className="font-medium" actualParams={aggregateActualParams} />
+                  </div>
+                  {task.params.output_compression != null && (
+                    <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                      <span className="text-gray-400 dark:text-gray-500">压缩率</span>
+                      <br />
+                      <DetailParamValue task={task} paramKey="output_compression" className="font-medium" actualParams={currentActualParams} />
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

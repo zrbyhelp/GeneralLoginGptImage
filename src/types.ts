@@ -1,10 +1,32 @@
 // ===== 设置 =====
 
-export type ApiMode = 'images' | 'responses'
-export type ApiProvider = 'openai' | 'fal'
+export type ApiMode = 'images' | 'responses' | 'generateContent'
+export type ApiProvider = 'openai' | 'fal' | 'google-gemini'
 export type PricingMode = 'flat' | 'tiered'
 export type SizePriceTier = '1K' | '2K' | '4K'
 export type QualityPricePoints = Record<TaskParams['quality'], number>
+export type GeminiMediaResolution = 'auto' | 'low' | 'medium' | 'high'
+export type GeminiThinkingMode = 'auto' | 'off' | 'low' | 'high'
+export type GeminiSafetyLevel = 'default' | 'strict' | 'balanced' | 'relaxed'
+
+export interface GeminiUserParams {
+  mediaResolution: GeminiMediaResolution
+  temperature: number | null
+  thinkingMode: GeminiThinkingMode
+  safetyLevel: GeminiSafetyLevel
+}
+
+export interface GeminiAdminDefaults {
+  topP?: number | null
+  topK?: number | null
+  maxOutputTokens?: number | null
+  seed?: number | null
+  responseMimeType?: string
+  imageConfig?: Record<string, unknown> | null
+  generationConfig?: Record<string, unknown> | null
+  thinkingConfig?: Record<string, unknown> | null
+  safetySettings?: unknown[] | null
+}
 
 export interface TieredPricingRules {
   sizeQualityPoints: Record<SizePriceTier, QualityPricePoints>
@@ -38,6 +60,7 @@ export interface AdminModelConfig {
   timeout: number
   apiMode: ApiMode
   codexCompatible: boolean
+  geminiDefaults?: GeminiAdminDefaults
   enabled: boolean
   pricingMode: PricingMode
   pricingRules: TieredPricingRules
@@ -90,6 +113,7 @@ export interface TaskParams {
   output_compression: number | null
   moderation: 'auto' | 'low'
   n: number
+  gemini?: GeminiUserParams
 }
 
 export const DEFAULT_PARAMS: TaskParams = {
@@ -99,6 +123,12 @@ export const DEFAULT_PARAMS: TaskParams = {
   output_compression: null,
   moderation: 'auto',
   n: 1,
+  gemini: {
+    mediaResolution: 'auto',
+    temperature: null,
+    thinkingMode: 'auto',
+    safetyLevel: 'default',
+  },
 }
 
 // ===== 输入图片（UI 层面） =====

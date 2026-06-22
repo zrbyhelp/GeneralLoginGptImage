@@ -1,6 +1,10 @@
 import { fal } from '@fal-ai/client'
 import type {
   FalApiResponse,
+  GeminiAdminDefaults,
+  GeminiSafetyLevel,
+  GeminiThinkingMode,
+  GeminiUserParams,
   ImageApiResponse,
   ResponsesApiResponse,
   TaskParams,
@@ -115,6 +119,17 @@ function mergeActualParams(...sources: Array<Partial<TaskParams> | undefined>) {
   return Object.keys(merged).length ? merged as Partial<TaskParams> : undefined
 }
 
+function dataUrlToInlineData(dataUrl: string, fallbackType = 'image/png') {
+  const match = dataUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/s)
+  if (!match) throw new Error('图片数据格式无效')
+  const mimeType = match[1] || fallbackType
+  const payload = match[3] || ''
+  const data = match[2]
+    ? payload
+    : Buffer.from(decodeURIComponent(payload)).toString('base64')
+  return { mimeType, data }
+}
+
 function mergeConcurrentResults(results: PromiseSettledResult<ServerImageApiResult>[]) {
   const successful = results
     .filter((result): result is PromiseFulfilledResult<ServerImageApiResult> => result.status === 'fulfilled')
@@ -211,9 +226,183 @@ export async function callServerImageApi(opts: {
   maskDataUrl?: string
 }): Promise<ServerImageApiResult> {
   if (opts.config.provider === 'fal') return callFalImageApi(opts)
+  if (opts.config.provider === 'google-gemini') return callGeminiGenerateContentApi(opts)
   return opts.config.apiMode === 'responses'
     ? callResponsesImageApi(opts)
     : callImagesApi(opts)
+}
+
+function buildGeminiApiUrl(baseUrl: string, model: string) {
+  const normalizedModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '') || 'gemini-3.1-flash-image'
+  const modelPath = normalizedModel.startsWith('models/') ? normalizedModel : `models/${normalizedModel}`
+  return `${normalizeBaseUrl(baseUrl)}/${modelPath}:generateContent`
+}
+
+function mapGeminiMediaResolution(value: GeminiUserParams['mediaResolution'] | undefined) {
+  if (value === 'low') return 'MEDIA_RESOLUTION_LOW'
+  if (value === 'medium') return 'MEDIA_RESOLUTION_MEDIUM'
+  if (value === 'high') return 'MEDIA_RESOLUTION_HIGH'
+  return undefined
+}
+
+function mapGeminiThinkingConfig(mode: GeminiThinkingMode | undefined) {
+  if (mode === 'off') return { thinkingLevel: 'minimal' }
+  if (mode === 'low') return { thinkingLevel: 'low' }
+  if (mode === 'high') return { thinkingLevel: 'high' }
+  return undefined
+}
+
+function mapGeminiSafetySettings(level: GeminiSafetyLevel | undefined) {
+  const threshold = level === 'strict'
+    ? 'BLOCK_LOW_AND_ABOVE'
+    : level === 'balanced'
+      ? 'BLOCK_MEDIUM_AND_ABOVE'
+      : level === 'relaxed'
+        ? 'BLOCK_ONLY_HIGH'
+        : null
+  if (!threshold) return undefined
+  return [
+    'HARM_CATEGORY_HARASSMENT',
+    'HARM_CATEGORY_HATE_SPEECH',
+    'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+    'HARM_CATEGORY_DANGEROUS_CONTENT',
+  ].map((category) => ({ category, threshold }))
+}
+
+function compactRecord(record: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) =>
+      value !== undefined &&
+      value !== null &&
+      !(typeof value === 'string' && !value.trim()) &&
+      !(Array.isArray(value) && value.length === 0),
+    ),
+  )
+}
+
+function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdminDefaults) {
+  const gemini = params.gemini
+  const mediaResolution = mapGeminiMediaResolution(gemini?.mediaResolution)
+  const generationConfig: Record<string, unknown> = {
+    ...(defaults?.generationConfig ?? {}),
+    responseModalities: ['Image'],
+    candidateCount: 1,
+    mediaResolution,
+  }
+
+  if (gemini?.temperature != null) generationConfig.temperature = gemini.temperature
+  if (defaults?.topP != null) generationConfig.topP = defaults.topP
+  if (defaults?.topK != null) generationConfig.topK = defaults.topK
+  if (defaults?.maxOutputTokens != null) generationConfig.maxOutputTokens = defaults.maxOutputTokens
+  if (defaults?.seed != null) generationConfig.seed = defaults.seed
+  if (defaults?.responseMimeType) generationConfig.responseMimeType = defaults.responseMimeType
+  if (defaults?.imageConfig) generationConfig.imageConfig = defaults.imageConfig
+
+  const userThinkingConfig = mapGeminiThinkingConfig(gemini?.thinkingMode)
+  const thinkingConfig = userThinkingConfig ?? defaults?.thinkingConfig
+  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig
+
+  return compactRecord(generationConfig)
+}
+
+function createGeminiSafetySettings(params: TaskParams, defaults?: GeminiAdminDefaults) {
+  return mapGeminiSafetySettings(params.gemini?.safetyLevel) ?? defaults?.safetySettings ?? undefined
+}
+
+function readGeminiInlineImagePart(part: unknown, fallbackMime = 'image/png') {
+  if (!part || typeof part !== 'object') return null
+  const record = part as Record<string, unknown>
+  const inlineData = (record.inlineData ?? record.inline_data) as Record<string, unknown> | undefined
+  if (!inlineData || typeof inlineData !== 'object') return null
+  const data = inlineData.data
+  if (typeof data !== 'string' || !data.trim()) return null
+  const mimeType = typeof inlineData.mimeType === 'string'
+    ? inlineData.mimeType
+    : typeof inlineData.mime_type === 'string'
+      ? inlineData.mime_type
+      : fallbackMime
+  return normalizeBase64Image(data, mimeType || fallbackMime)
+}
+
+function parseGeminiImageResults(payload: unknown) {
+  const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+  const candidates = Array.isArray(record.candidates) ? record.candidates : []
+  const parts: unknown[] = []
+  for (const candidate of candidates) {
+    const candidateRecord = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : {}
+    const content = candidateRecord.content && typeof candidateRecord.content === 'object'
+      ? candidateRecord.content as Record<string, unknown>
+      : {}
+    if (Array.isArray(content.parts)) parts.push(...content.parts)
+  }
+  if (!parts.length && Array.isArray(record.parts)) parts.push(...record.parts)
+
+  const images = parts
+    .map((part) => readGeminiInlineImagePart(part))
+    .filter((image): image is string => Boolean(image))
+  if (!images.length) throw new Error('Gemini 未返回可用图片数据')
+  return images
+}
+
+async function callGeminiGenerateContentApi(opts: {
+  config: ServerApiConfig
+  prompt: string
+  params: TaskParams
+  inputImageDataUrls: string[]
+  maskDataUrl?: string
+}): Promise<ServerImageApiResult> {
+  if (opts.maskDataUrl) throw new Error('Google Gemini 暂不支持遮罩编辑')
+
+  const n = Math.max(1, opts.params.n || 1)
+  if (n > 1) {
+    const single = { ...opts, params: { ...opts.params, n: 1 } }
+    const results = await Promise.allSettled(
+      Array.from({ length: n }, () => callGeminiGenerateContentApi(single)),
+    )
+    return mergeConcurrentResults(results)
+  }
+
+  const parts: Array<Record<string, unknown>> = [
+    { text: opts.prompt },
+    ...opts.inputImageDataUrls.map((dataUrl) => ({
+      inlineData: dataUrlToInlineData(dataUrl),
+    })),
+  ]
+  const safetySettings = createGeminiSafetySettings(opts.params, opts.config.geminiDefaults)
+  const body = compactRecord({
+    contents: [{ role: 'user', parts }],
+    generationConfig: createGeminiGenerationConfig(opts.params, opts.config.geminiDefaults),
+    safetySettings,
+  })
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), opts.config.timeout * 1000)
+  try {
+    const response = await fetch(buildGeminiApiUrl(opts.config.baseUrl, opts.config.model), {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': opts.config.apiKey,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, max-age=0',
+        Pragma: 'no-cache',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+
+    if (!response.ok) throw new Error(await getApiErrorMessage(response))
+    const images = parseGeminiImageResults(await response.json())
+    const actualParams = mergeActualParams({ n: images.length, gemini: opts.params.gemini })
+    return {
+      images,
+      actualParams,
+      actualParamsList: images.map(() => actualParams),
+      revisedPrompts: images.map(() => undefined),
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 async function callImagesApi(opts: {

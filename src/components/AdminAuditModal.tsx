@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { AdminModelConfig, ApiMode, ApiProvider, SizePriceTier, TaskParams, TieredPricingRules } from '../types'
+import type { AdminModelConfig, ApiMode, ApiProvider, GeminiAdminDefaults, SizePriceTier, TaskParams, TieredPricingRules } from '../types'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { DEFAULT_OPENAI_TIERED_PRICING_RULES, normalizeTieredPricingRules } from '../lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES, normalizeTieredPricingRules } from '../lib/pricing'
+import { DEFAULT_GEMINI_ADMIN_DEFAULTS, DEFAULT_GEMINI_BASE_URL, DEFAULT_GEMINI_MODEL, normalizeGeminiAdminDefaults } from '../lib/gemini'
 
 type AdminSettings = {
   models: AdminModelConfig[]
@@ -61,13 +62,32 @@ function patchModel(models: AdminModelConfig[], id: string, patch: Partial<Admin
   return models.map((model) => {
     if (model.id !== id) return model
     const provider = patch.provider ?? model.provider
+    const switchedProvider = patch.provider && patch.provider !== model.provider
+    const isGemini = provider === 'google-gemini'
     return {
       ...model,
       ...patch,
-      apiMode: provider === 'fal' ? 'images' : patch.apiMode ?? model.apiMode,
+      apiMode: provider === 'fal' ? 'images' : isGemini ? 'generateContent' : patch.apiMode ?? model.apiMode,
       codexCompatible: provider === 'openai' ? patch.codexCompatible ?? model.codexCompatible : false,
-      baseUrl: patch.provider === 'fal' ? 'https://fal.run' : patch.baseUrl ?? model.baseUrl,
-      model: patch.provider === 'fal' && !model.model.trim() ? 'openai/gpt-image-2' : patch.model ?? model.model,
+      baseUrl: switchedProvider
+        ? provider === 'fal'
+          ? 'https://fal.run'
+          : isGemini
+            ? DEFAULT_GEMINI_BASE_URL
+            : 'https://api.openai.com/v1'
+        : patch.baseUrl ?? model.baseUrl,
+      model: switchedProvider
+        ? provider === 'fal'
+          ? 'openai/gpt-image-2'
+          : isGemini
+            ? DEFAULT_GEMINI_MODEL
+            : 'gpt-image-2'
+        : patch.model ?? model.model,
+      geminiDefaults: isGemini
+        ? normalizeGeminiAdminDefaults(patch.geminiDefaults ?? model.geminiDefaults ?? DEFAULT_GEMINI_ADMIN_DEFAULTS)
+        : undefined,
+      pricingMode: switchedProvider && isGemini ? 'tiered' : patch.pricingMode ?? model.pricingMode,
+      pricingRules: switchedProvider && isGemini ? DEFAULT_GEMINI_TIERED_PRICING_RULES : patch.pricingRules ?? model.pricingRules,
     }
   })
 }
@@ -84,6 +104,22 @@ function patchPricingRules(
 
 function pricingNumber(value: string) {
   return Math.max(0, Math.floor(Number(value) || 0))
+}
+
+function nullableNumber(value: string) {
+  if (!value.trim()) return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function parseJsonValue(value: string) {
+  if (!value.trim()) return null
+  return JSON.parse(value)
+}
+
+function formatJsonValue(value: unknown) {
+  if (value == null) return ''
+  return JSON.stringify(value, null, 2)
 }
 
 export default function AdminAuditModal() {
@@ -201,6 +237,23 @@ export default function AdminAuditModal() {
     }))
   }
 
+  function updateGeminiDefaults(id: string, patch: Partial<GeminiAdminDefaults>) {
+    setSettings((prev) => ({
+      ...prev,
+      models: prev.models.map((model) =>
+        model.id === id
+          ? {
+              ...model,
+              geminiDefaults: normalizeGeminiAdminDefaults({
+                ...(model.geminiDefaults ?? DEFAULT_GEMINI_ADMIN_DEFAULTS),
+                ...patch,
+              }),
+            }
+          : model,
+      ),
+    }))
+  }
+
   function updateTierPrice(id: string, tier: SizePriceTier, quality: TaskParams['quality'], value: string) {
     updateModelPricingRule(id, (rules) => ({
       ...rules,
@@ -306,7 +359,11 @@ export default function AdminAuditModal() {
             </div>
             <div className="space-y-4">
               {settings.models.map((model, index) => {
-                const pricingRules = normalizeTieredPricingRules(model.pricingRules)
+                const providerPricingTemplate = model.provider === 'google-gemini'
+                  ? DEFAULT_GEMINI_TIERED_PRICING_RULES
+                  : DEFAULT_OPENAI_TIERED_PRICING_RULES
+                const pricingRules = normalizeTieredPricingRules(model.pricingRules, providerPricingTemplate)
+                const geminiDefaults = normalizeGeminiAdminDefaults(model.geminiDefaults)
                 return (
                 <div key={model.id} className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -335,9 +392,10 @@ export default function AdminAuditModal() {
                       <select value={model.provider} onChange={(event) => updateModel(model.id, { provider: event.target.value as ApiProvider })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100">
                         <option value="openai">OpenAI 兼容接口</option>
                         <option value="fal">fal.ai</option>
+                        <option value="google-gemini">Google Gemini</option>
                       </select>
                     </label>
-                    {model.provider === 'openai' && (
+                    {(model.provider === 'openai' || model.provider === 'google-gemini') && (
                       <label className="block">
                         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
                         <input value={model.baseUrl} onChange={(event) => updateModel(model.id, { baseUrl: event.target.value })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
@@ -360,6 +418,12 @@ export default function AdminAuditModal() {
                         </select>
                       </label>
                     )}
+                    {model.provider === 'google-gemini' && (
+                      <div className="rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">调用方式</span>
+                        generateContent
+                      </div>
+                    )}
                     <label className="block">
                       <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">请求超时 (秒)</span>
                       <input value={model.timeout} onChange={(event) => updateModel(model.id, { timeout: Math.max(10, Number(event.target.value) || 600) })} min={10} max={3600} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
@@ -373,6 +437,60 @@ export default function AdminAuditModal() {
                       </div>
                     )}
                   </div>
+                  {model.provider === 'google-gemini' && (
+                    <div className="mt-4 border-t border-gray-200/70 pt-4 dark:border-white/[0.08]">
+                      <div className="mb-3">
+                        <h5 className="text-xs font-medium text-gray-700 dark:text-gray-200">Gemini 默认高级参数</h5>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">topP</span>
+                          <input value={geminiDefaults.topP ?? ''} onChange={(event) => updateGeminiDefaults(model.id, { topP: nullableNumber(event.target.value) })} type="number" min={0} max={1} step={0.01} placeholder="空为不提交" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">topK</span>
+                          <input value={geminiDefaults.topK ?? ''} onChange={(event) => updateGeminiDefaults(model.id, { topK: nullableNumber(event.target.value) })} type="number" min={1} max={1000} placeholder="空为不提交" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">maxOutputTokens</span>
+                          <input value={geminiDefaults.maxOutputTokens ?? ''} onChange={(event) => updateGeminiDefaults(model.id, { maxOutputTokens: nullableNumber(event.target.value) })} type="number" min={1} placeholder="空为不提交" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">seed</span>
+                          <input value={geminiDefaults.seed ?? ''} onChange={(event) => updateGeminiDefaults(model.id, { seed: nullableNumber(event.target.value) })} type="number" min={0} placeholder="空为不提交" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">responseMimeType</span>
+                          <input value={geminiDefaults.responseMimeType ?? ''} onChange={(event) => updateGeminiDefaults(model.id, { responseMimeType: event.target.value })} placeholder="例如 image/png" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                        </label>
+                      </div>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {([
+                          ['imageConfig', 'imageConfig JSON'],
+                          ['generationConfig', 'generationConfig JSON'],
+                          ['thinkingConfig', 'thinkingConfig JSON'],
+                          ['safetySettings', 'safetySettings JSON'],
+                        ] as const).map(([key, label]) => (
+                          <label key={key} className="block">
+                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{label}</span>
+                            <textarea
+                              key={`${model.id}-${key}-${formatJsonValue(geminiDefaults[key])}`}
+                              defaultValue={formatJsonValue(geminiDefaults[key])}
+                              onBlur={(event) => {
+                                try {
+                                  updateGeminiDefaults(model.id, { [key]: parseJsonValue(event.target.value) } as Partial<GeminiAdminDefaults>)
+                                } catch (error) {
+                                  showToast(`${label} 不是有效 JSON`, 'error')
+                                }
+                              }}
+                              rows={3}
+                              className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 font-mono text-xs dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="mt-4 border-t border-gray-200/70 pt-4 dark:border-white/[0.08]">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -404,10 +522,10 @@ export default function AdminAuditModal() {
                         <div className="flex justify-end">
                           <button
                             type="button"
-                            onClick={() => updateModel(model.id, { pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES })}
+                            onClick={() => updateModel(model.id, { pricingRules: providerPricingTemplate })}
                             className="rounded-lg border border-blue-200 bg-white/70 px-2.5 py-1 text-xs font-medium text-blue-600 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-white/[0.04] dark:text-blue-300 dark:hover:bg-blue-500/10"
                           >
-                            填充官方 OpenAI 保守模板
+                            填充{model.provider === 'google-gemini' ? ' Gemini' : '官方 OpenAI'}保守模板
                           </button>
                         </div>
                         <div className="overflow-x-auto">

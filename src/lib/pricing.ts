@@ -24,7 +24,19 @@ export const DEFAULT_OPENAI_TIERED_PRICING_RULES: TieredPricingRules = {
   minimumPoints: 1000,
 }
 
+export const DEFAULT_GEMINI_TIERED_PRICING_RULES: TieredPricingRules = {
+  sizeQualityPoints: {
+    '1K': { low: 4000, medium: 12000, high: 72000, auto: 20000 },
+    '2K': { low: 16000, medium: 48000, high: 288000, auto: 80000 },
+    '4K': { low: 32000, medium: 96000, high: 580000, auto: 160000 },
+  },
+  referenceImagePoints: 4000,
+  maskEditPoints: 0,
+  minimumPoints: 4000,
+}
+
 type PricedModel = Pick<AdminModelConfig | PublicGenerationModel, 'pricingMode'> & {
+  provider?: AdminModelConfig['provider'] | PublicGenerationModel['provider']
   pricingRules?: TieredPricingRules
   pricingPreviewRules?: TieredPricingRules
 }
@@ -56,7 +68,10 @@ export function normalizePricingMode(value: unknown): PricingMode {
   return value === 'tiered' ? 'tiered' : 'flat'
 }
 
-export function normalizeTieredPricingRules(input: unknown): TieredPricingRules {
+export function normalizeTieredPricingRules(
+  input: unknown,
+  fallbackRules: TieredPricingRules = DEFAULT_OPENAI_TIERED_PRICING_RULES,
+): TieredPricingRules {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   const sizeQualityRecord = record.sizeQualityPoints && typeof record.sizeQualityPoints === 'object'
     ? record.sizeQualityPoints as Record<string, unknown>
@@ -64,12 +79,12 @@ export function normalizeTieredPricingRules(input: unknown): TieredPricingRules 
 
   return {
     sizeQualityPoints: SIZE_TIERS.reduce((acc, tier) => {
-      acc[tier] = normalizeQualityPoints(sizeQualityRecord[tier], DEFAULT_OPENAI_TIERED_PRICING_RULES.sizeQualityPoints[tier])
+      acc[tier] = normalizeQualityPoints(sizeQualityRecord[tier], fallbackRules.sizeQualityPoints[tier])
       return acc
     }, {} as TieredPricingRules['sizeQualityPoints']),
-    referenceImagePoints: parsePositiveInt(record.referenceImagePoints, DEFAULT_OPENAI_TIERED_PRICING_RULES.referenceImagePoints, 0, 1_000_000),
-    maskEditPoints: parsePositiveInt(record.maskEditPoints, DEFAULT_OPENAI_TIERED_PRICING_RULES.maskEditPoints, 0, 1_000_000),
-    minimumPoints: parsePositiveInt(record.minimumPoints, DEFAULT_OPENAI_TIERED_PRICING_RULES.minimumPoints, 1, 1_000_000),
+    referenceImagePoints: parsePositiveInt(record.referenceImagePoints, fallbackRules.referenceImagePoints, 0, 1_000_000),
+    maskEditPoints: parsePositiveInt(record.maskEditPoints, fallbackRules.maskEditPoints, 0, 1_000_000),
+    minimumPoints: parsePositiveInt(record.minimumPoints, fallbackRules.minimumPoints, 1, 1_000_000),
   }
 }
 
@@ -91,8 +106,30 @@ export function getSizePricingTier(size: string): SizePriceTier {
   return '4K'
 }
 
+function getDefaultPricingRules(model?: PricedModel | null) {
+  return model?.provider === 'google-gemini'
+    ? DEFAULT_GEMINI_TIERED_PRICING_RULES
+    : DEFAULT_OPENAI_TIERED_PRICING_RULES
+}
+
+function normalizeTieredPricingRulesWithFallback(input: unknown, fallback: TieredPricingRules): TieredPricingRules {
+  const normalized = normalizeTieredPricingRules(input, fallback)
+  if (input == null) return fallback
+  return normalized
+}
+
 function getPricingRules(model?: PricedModel | null) {
-  return normalizeTieredPricingRules(model?.pricingRules ?? model?.pricingPreviewRules)
+  return normalizeTieredPricingRulesWithFallback(
+    model?.pricingRules ?? model?.pricingPreviewRules,
+    getDefaultPricingRules(model),
+  )
+}
+
+function getGeminiMediaResolutionPricingTier(params: TaskParams): SizePriceTier {
+  const mediaResolution = params.gemini?.mediaResolution ?? DEFAULT_PARAMS.gemini?.mediaResolution ?? 'auto'
+  if (mediaResolution === 'low') return '1K'
+  if (mediaResolution === 'high') return '4K'
+  return '2K'
 }
 
 export function calculateGenerationPricing(input: PricingInput): PricingBreakdown {
@@ -118,11 +155,15 @@ export function calculateGenerationPricing(input: PricingInput): PricingBreakdow
   }
 
   const rules = getPricingRules(input.model)
-  const quality = input.params.quality || DEFAULT_PARAMS.quality
-  const sizeTier = getSizePricingTier(input.params.size || DEFAULT_PARAMS.size)
+  const quality = input.model?.provider === 'google-gemini'
+    ? DEFAULT_PARAMS.quality
+    : input.params.quality || DEFAULT_PARAMS.quality
+  const sizeTier = input.model?.provider === 'google-gemini'
+    ? getGeminiMediaResolutionPricingTier(input.params)
+    : getSizePricingTier(input.params.size || DEFAULT_PARAMS.size)
   const basePoints = parsePositiveInt(
     rules.sizeQualityPoints[sizeTier]?.[quality],
-    DEFAULT_OPENAI_TIERED_PRICING_RULES.sizeQualityPoints[sizeTier][quality],
+    getDefaultPricingRules(input.model).sizeQualityPoints[sizeTier][quality],
     1,
     1_000_000,
   )

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultAdminSettings, getPublicGenerationModels, selectGenerationModel, updateAdminSettings, getAdminSettings } from './admin-settings'
-import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import { setDatabasePathForTests } from './db'
 
 describe('admin settings models', () => {
@@ -127,5 +127,63 @@ describe('admin settings models', () => {
       }),
     })
     expect(getPublicGenerationModels(settings)[0]).not.toHaveProperty('pricingRules')
+  })
+
+  it('persists Gemini models with generateContent mode and hidden admin defaults', async () => {
+    const defaults = getDefaultAdminSettings()
+    const model = {
+      ...defaults.models[0],
+      id: 'gemini',
+      name: 'Google Gemini',
+      provider: 'google-gemini' as const,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKey: 'gemini-key',
+      model: 'gemini-3.1-flash-image',
+      apiMode: 'generateContent' as const,
+      codexCompatible: true,
+      enabled: true,
+      pricingMode: 'tiered' as const,
+      pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
+      geminiDefaults: {
+        topP: 0.9,
+        topK: 40,
+        maxOutputTokens: 8192,
+        seed: 123,
+        responseMimeType: 'image/png',
+        imageConfig: { aspectRatio: '16:9' },
+        generationConfig: null,
+        thinkingConfig: null,
+        safetySettings: null,
+      },
+    }
+    await updateAdminSettings({ models: [model], defaultModelId: model.id })
+
+    const settings = await getAdminSettings()
+    expect(settings.models[0]).toMatchObject({
+      id: 'gemini',
+      provider: 'google-gemini',
+      apiMode: 'generateContent',
+      codexCompatible: false,
+      pricingMode: 'tiered',
+      pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
+      geminiDefaults: expect.objectContaining({
+        topP: 0.9,
+        topK: 40,
+        maxOutputTokens: 8192,
+        seed: 123,
+        responseMimeType: 'image/png',
+        imageConfig: { aspectRatio: '16:9' },
+      }),
+    })
+    const publicModel = getPublicGenerationModels(settings)[0]
+    expect(publicModel).toMatchObject({
+      id: 'gemini',
+      provider: 'google-gemini',
+      apiMode: 'generateContent',
+      pricingPreviewRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
+    })
+    expect(publicModel).not.toHaveProperty('apiKey')
+    expect(publicModel).not.toHaveProperty('baseUrl')
+    expect(publicModel).not.toHaveProperty('geminiDefaults')
   })
 })

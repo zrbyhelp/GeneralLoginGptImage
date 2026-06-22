@@ -1,19 +1,11 @@
 import { createError } from 'h3'
-import type { TaskParams } from '../../../src/types'
+import { DEFAULT_PARAMS, type TaskParams } from '../../../src/types'
 import { requireUser, isAdminUser } from '../../utils/auth'
 import { assertApiConfigUsable, getAdminSettings, selectGenerationModel } from '../../utils/admin-settings'
 import { countRecentGeneratedImages } from '../../utils/generation-usage'
 import { createImageGenerationJob } from '../../utils/image-generation-queue'
 import { calculateGenerationPricing } from '../../../src/lib/pricing'
-
-const DEFAULT_PARAMS: TaskParams = {
-  size: 'auto',
-  quality: 'auto',
-  output_format: 'png',
-  output_compression: null,
-  moderation: 'auto',
-  n: 1,
-}
+import { normalizeGeminiUserParams } from '../../../src/lib/paramCompatibility'
 
 const FORBIDDEN_API_KEYS = new Set([
   'settings',
@@ -44,7 +36,8 @@ const FORBIDDEN_API_KEYS = new Set([
 ])
 const LEGACY_IGNORED_KEYS = new Set(['usePremiumApi'])
 
-const ALLOWED_PARAM_KEYS = new Set(['size', 'quality', 'output_format', 'output_compression', 'moderation', 'n'])
+const ALLOWED_PARAM_KEYS = new Set(['size', 'quality', 'output_format', 'output_compression', 'moderation', 'n', 'gemini'])
+const ALLOWED_GEMINI_PARAM_KEYS = new Set(['mediaResolution', 'temperature', 'thinkingMode', 'safetyLevel'])
 
 function assertNoApiOverrides(record: Record<string, unknown>, label = '请求') {
   for (const key of Object.keys(record)) {
@@ -64,6 +57,15 @@ function normalizeParams(input: unknown, provider: string, codexCompatible: bool
       throw createError({ statusCode: 400, statusMessage: `不支持的生成参数：${key}` })
     }
   }
+  if (record.gemini !== undefined) {
+    const geminiRecord = record.gemini && typeof record.gemini === 'object' ? record.gemini as Record<string, unknown> : {}
+    assertNoApiOverrides(geminiRecord, 'Gemini 参数')
+    for (const key of Object.keys(geminiRecord)) {
+      if (!ALLOWED_GEMINI_PARAM_KEYS.has(key)) {
+        throw createError({ statusCode: 400, statusMessage: `不支持的 Gemini 生成参数：${key}` })
+      }
+    }
+  }
 
   const quality = record.quality === 'low' || record.quality === 'medium' || record.quality === 'high' || record.quality === 'auto'
     ? record.quality
@@ -79,13 +81,17 @@ function normalizeParams(input: unknown, provider: string, codexCompatible: bool
     ? Math.max(0, Math.min(100, Math.floor(record.output_compression)))
     : null
 
+  const geminiParams = normalizeGeminiUserParams(record.gemini)
+  const isGemini = provider === 'google-gemini'
+
   return {
-    size: typeof record.size === 'string' && record.size.trim() ? record.size.trim() : DEFAULT_PARAMS.size,
-    quality: codexCompatible ? DEFAULT_PARAMS.quality : quality,
-    output_format: codexCompatible ? DEFAULT_PARAMS.output_format : outputFormat,
-    output_compression: codexCompatible || outputFormat === 'png' ? null : compression,
-    moderation: codexCompatible ? DEFAULT_PARAMS.moderation : moderation,
+    size: codexCompatible || isGemini ? DEFAULT_PARAMS.size : typeof record.size === 'string' && record.size.trim() ? record.size.trim() : DEFAULT_PARAMS.size,
+    quality: codexCompatible || isGemini ? DEFAULT_PARAMS.quality : quality,
+    output_format: codexCompatible || isGemini ? DEFAULT_PARAMS.output_format : outputFormat,
+    output_compression: codexCompatible || isGemini || outputFormat === 'png' ? null : compression,
+    moderation: codexCompatible || isGemini ? DEFAULT_PARAMS.moderation : moderation,
     n,
+    gemini: isGemini ? geminiParams : normalizeGeminiUserParams(undefined),
   }
 }
 
@@ -112,6 +118,9 @@ export default defineEventHandler(async (event) => {
   const uploadToGallery = body.uploadToGallery === true || body.privacyMode === false
   const privacyMode = !uploadToGallery
   const apiConfig = selectGenerationModel(settings, body.modelId)
+  if (apiConfig.provider === 'google-gemini' && maskDataUrl) {
+    throw createError({ statusCode: 400, statusMessage: 'Google Gemini 暂不支持遮罩编辑' })
+  }
   const params = normalizeParams(body.params, apiConfig.provider, apiConfig.codexCompatible)
   const pricing = calculateGenerationPricing({
     model: apiConfig,

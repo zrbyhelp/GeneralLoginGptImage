@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import type { ServerApiConfig } from './admin-settings'
 import { callServerImageApi } from './server-image-api'
 
@@ -23,6 +23,31 @@ const imagesConfig: ServerApiConfig = {
   apiMode: 'images',
 }
 
+const geminiConfig: ServerApiConfig = {
+  id: 'model-gemini',
+  name: 'Gemini model',
+  provider: 'google-gemini',
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  apiKey: 'gemini-key',
+  model: 'gemini-3.1-flash-image',
+  timeout: 10,
+  apiMode: 'generateContent',
+  codexCompatible: false,
+  pricingMode: 'tiered',
+  pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
+  geminiDefaults: {
+    topP: 0.9,
+    topK: 40,
+    maxOutputTokens: 8192,
+    seed: 123,
+    responseMimeType: 'image/png',
+    imageConfig: { aspectRatio: '16:9' },
+    generationConfig: { stopSequences: ['END'] },
+    thinkingConfig: { thinkingBudget: 128 },
+    safetySettings: [{ category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' }],
+  },
+}
+
 const params = {
   size: '1024x1024',
   quality: 'auto' as const,
@@ -30,6 +55,12 @@ const params = {
   output_compression: null,
   moderation: 'auto' as const,
   n: 3,
+  gemini: {
+    mediaResolution: 'high' as const,
+    temperature: 0.8,
+    thinkingMode: 'low' as const,
+    safetyLevel: 'balanced' as const,
+  },
 }
 
 function responsesImage(result: string) {
@@ -223,5 +254,106 @@ describe('server image API Codex compatible Responses mode', () => {
     expect(body.tools[0]).not.toHaveProperty('output_format')
     expect(body.tools[0]).not.toHaveProperty('output_compression')
     expect(body.tools[0]).not.toHaveProperty('moderation')
+  })
+})
+
+describe('server image API Gemini generateContent mode', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('calls Google generateContent with simplified user params and admin defaults', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: 'gemini-image',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const result = await callServerImageApi({
+      config: geminiConfig,
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: ['data:image/jpeg;base64,input-image'],
+    })
+
+    expect(result.images).toEqual(['data:image/png;base64,gemini-image'])
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-goog-api-key': 'gemini-key',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    )
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.contents[0].parts).toEqual([
+      { text: 'prompt' },
+      { inlineData: { mimeType: 'image/jpeg', data: 'input-image' } },
+    ])
+    expect(body.generationConfig).toMatchObject({
+      candidateCount: 1,
+      responseModalities: ['Image'],
+      mediaResolution: 'MEDIA_RESOLUTION_HIGH',
+      temperature: 0.8,
+      topP: 0.9,
+      topK: 40,
+      maxOutputTokens: 8192,
+      seed: 123,
+      responseMimeType: 'image/png',
+      imageConfig: { aspectRatio: '16:9' },
+      stopSequences: ['END'],
+      thinkingConfig: { thinkingLevel: 'low' },
+    })
+    expect(body.safetySettings).toEqual([
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+    ])
+  })
+
+  it('parses snake_case inline image responses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                inline_data: {
+                  mime_type: 'image/webp',
+                  data: 'snake-image',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }), { status: 200 }))
+
+    const result = await callServerImageApi({
+      config: geminiConfig,
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: [],
+    })
+
+    expect(result.images).toEqual(['data:image/webp;base64,snake-image'])
   })
 })

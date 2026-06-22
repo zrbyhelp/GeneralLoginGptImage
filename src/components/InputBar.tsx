@@ -164,12 +164,13 @@ export default function InputBar() {
     null
   const activeProvider = selectedModel?.provider ?? 'openai'
   const isFalProvider = activeProvider === 'fal'
+  const isGeminiProvider = activeProvider === 'google-gemini'
   const isCodexCompatible = Boolean(selectedModel?.codexCompatible)
-  const moderationDisabled = isCodexCompatible || selectedModel?.apiMode === 'responses' || isFalProvider
-  const compressionDisabled = isCodexCompatible || params.output_format === 'png' || isFalProvider
-  const outputFormatDisabled = isCodexCompatible
-  const sizeDisabled = isCodexCompatible
-  const qualityDisabled = isCodexCompatible
+  const moderationDisabled = isCodexCompatible || selectedModel?.apiMode === 'responses' || isFalProvider || isGeminiProvider
+  const compressionDisabled = isCodexCompatible || params.output_format === 'png' || isFalProvider || isGeminiProvider
+  const outputFormatDisabled = isCodexCompatible || isGeminiProvider
+  const sizeDisabled = isCodexCompatible || isGeminiProvider
+  const qualityDisabled = isCodexCompatible || isGeminiProvider
   const outputImageLimit = getOutputImageLimitForSettings(selectedModel)
   const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
   const pricingPreviewParams = normalizeParamsForSettings(params, selectedModel)
@@ -183,14 +184,19 @@ export default function InputBar() {
   })
   const currentTotalPointCost = pricingPreview.totalPoints
   const hasInsufficientPoints = pointsBalance != null && pointsBalance < currentTotalPointCost
-  const canSubmit = Boolean(prompt.trim())
+  const hasUnsupportedGeminiMask = isGeminiProvider && Boolean(maskDraft)
+  const canSubmit = Boolean(prompt.trim()) && !hasUnsupportedGeminiMask
   const submitTitle = !prompt.trim()
     ? '请输入提示词'
+    : hasUnsupportedGeminiMask
+      ? 'Google Gemini 暂不支持遮罩编辑'
     : hasInsufficientPoints
       ? '积分不足，点击查看补充方式'
       : maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)'
   const nLimitHintText = isFalProvider
     ? `fal.ai 最大请求数量为 ${outputImageLimit}`
+    : isGeminiProvider
+      ? `Gemini 最大请求数量为 ${outputImageLimit}`
     : `OpenAI 最大请求数量为 ${outputImageLimit}`
   const displaySize = isFalProvider && params.size === 'auto'
     ? DEFAULT_FAL_IMAGE_SIZE
@@ -389,11 +395,11 @@ export default function InputBar() {
   }
 
   const showQualityHint = () => {
-    if (isCodexCompatible || isFalProvider) setQualityHintVisible(true)
+    if (isCodexCompatible || isFalProvider || isGeminiProvider) setQualityHintVisible(true)
   }
 
   const showSizeHint = () => {
-    if (isCodexCompatible || isFalProvider) setSizeHintVisible(true)
+    if (isCodexCompatible || isFalProvider || isGeminiProvider) setSizeHintVisible(true)
   }
 
   const hideSizeHint = () => {
@@ -409,7 +415,7 @@ export default function InputBar() {
   }
 
   const startSizeHintTouch = () => {
-    if (!isCodexCompatible && !isFalProvider) return
+    if (!isCodexCompatible && !isFalProvider && !isGeminiProvider) return
     sizeHintTimerRef.current = window.setTimeout(() => {
       setSizeHintVisible(true)
       sizeHintTimerRef.current = null
@@ -429,7 +435,7 @@ export default function InputBar() {
   }
 
   const startQualityHintTouch = () => {
-    if (!isCodexCompatible && !isFalProvider) return
+    if (!isCodexCompatible && !isFalProvider && !isGeminiProvider) return
     qualityHintTimerRef.current = window.setTimeout(() => {
       setQualityHintVisible(true)
       qualityHintTimerRef.current = null
@@ -652,6 +658,7 @@ export default function InputBar() {
   }, [])
 
   const selectClass = 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'
+  const geminiParams = params.gemini ?? DEFAULT_PARAMS.gemini!
 
   const getTouchDropIndex = (touch: React.Touch) => {
     const target = document
@@ -726,7 +733,7 @@ export default function InputBar() {
 
   const renderImageThumb = (img: (typeof inputImages)[number], idx: number) => {
     const isMaskTarget = maskDraft?.targetImageId === img.id
-    const canEdit = !maskTargetImage || isMaskTarget
+    const canEdit = !isGeminiProvider && (!maskTargetImage || isMaskTarget)
     const imageHintText = isMaskTarget
       ? '遮罩图必须为第一张图'
       : maskTargetImage
@@ -860,7 +867,7 @@ export default function InputBar() {
           }`}
           onClick={() => {
             if (suppressImageClickRef.current) return
-            if (isMaskTarget) {
+            if (isMaskTarget && !isGeminiProvider) {
               setMaskEditorImageId(img.id)
               return
             }
@@ -982,8 +989,8 @@ export default function InputBar() {
           {displaySize}
         </button>
         <ButtonTooltip
-          visible={(isCodexCompatible || isFalProvider) && sizeHintVisible}
-          text={isCodexCompatible ? 'Codex 兼容模型不支持尺寸参数' : <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
+          visible={(isCodexCompatible || isFalProvider || isGeminiProvider) && sizeHintVisible}
+          text={isGeminiProvider ? 'Gemini 使用媒体精度，不支持精确尺寸参数' : isCodexCompatible ? 'Codex 兼容模型不支持尺寸参数' : <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
         />
       </label>
       <label
@@ -1009,7 +1016,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={(qualityDisabled || isFalProvider) && qualityHintVisible}
-          text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</> : 'Codex 兼容模型不支持质量参数'}
+          text={isGeminiProvider ? 'Gemini 使用媒体精度，不支持质量参数' : isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</> : 'Codex 兼容模型不支持质量参数'}
         />
       </label>
       <label className="flex flex-col gap-0.5">
@@ -1057,7 +1064,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={compressionHintVisible}
-          text={isCodexCompatible ? 'Codex 兼容模型不支持压缩率参数' : isFalProvider ? 'fal.ai 不支持压缩率参数' : '仅 JPEG 和 WebP 支持压缩率'}
+          text={isGeminiProvider ? 'Gemini 不支持压缩率参数' : isCodexCompatible ? 'Codex 兼容模型不支持压缩率参数' : isFalProvider ? 'fal.ai 不支持压缩率参数' : '仅 JPEG 和 WebP 支持压缩率'}
         />
       </label>
       <label
@@ -1086,7 +1093,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={moderationDisabled && moderationHintVisible}
-          text={isCodexCompatible ? 'Codex 兼容模型不支持审核参数' : isFalProvider ? 'fal.ai 不支持审核参数' : 'Responses API 不支持审核参数'}
+          text={isGeminiProvider ? 'Gemini 使用安全级别参数' : isCodexCompatible ? 'Codex 兼容模型不支持审核参数' : isFalProvider ? 'fal.ai 不支持审核参数' : 'Responses API 不支持审核参数'}
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
@@ -1116,6 +1123,101 @@ export default function InputBar() {
         />
         <ButtonTooltip visible={nLimitHintVisible} text={nLimitHintText} />
       </label>
+    </div>
+  )
+
+  const renderNumberParam = () => (
+    <label className="relative flex flex-col gap-0.5">
+      <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
+      <input
+        value={nInput}
+        onChange={(e) => handleNInputChange(e.target.value)}
+        onFocus={() => setNInputFocused(true)}
+        onBlur={() => {
+          setNInputFocused(false)
+          commitN()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp') {
+            handleNLimitIncreaseAttempt(() => e.preventDefault())
+          }
+        }}
+        onWheel={(e) => {
+          if (e.deltaY < 0) {
+            handleNLimitIncreaseAttempt(() => e.preventDefault())
+          }
+        }}
+        type="number"
+        min={1}
+        max={outputImageLimit}
+        className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] focus:outline-none text-xs transition-all duration-200 shadow-sm"
+      />
+      <ButtonTooltip visible={nLimitHintVisible} text={nLimitHintText} />
+    </label>
+  )
+
+  const renderGeminiParams = (cols: string) => (
+    <div className={`grid ${cols} gap-2 text-xs flex-1`}>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="text-gray-400 dark:text-gray-500 ml-1">媒体精度</span>
+        <Select
+          value={geminiParams.mediaResolution}
+          onChange={(val) => setParams({ gemini: { ...geminiParams, mediaResolution: val as any } })}
+          options={[
+            { label: '自动', value: 'auto' },
+            { label: '低', value: 'low' },
+            { label: '中', value: 'medium' },
+            { label: '高', value: 'high' },
+          ]}
+          className={selectClass}
+        />
+      </label>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="text-gray-400 dark:text-gray-500 ml-1">创造性</span>
+        <input
+          value={geminiParams.temperature == null ? '' : geminiParams.temperature}
+          onChange={(event) => {
+            const raw = event.target.value
+            const next = raw === '' ? null : Math.round(Math.min(2, Math.max(0, Number(raw) || 0)) * 100) / 100
+            setParams({ gemini: { ...geminiParams, temperature: next } })
+          }}
+          type="number"
+          min={0}
+          max={2}
+          step={0.1}
+          placeholder="自动"
+          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] focus:outline-none text-xs transition-all duration-200 shadow-sm"
+        />
+      </label>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="text-gray-400 dark:text-gray-500 ml-1">思考</span>
+        <Select
+          value={geminiParams.thinkingMode}
+          onChange={(val) => setParams({ gemini: { ...geminiParams, thinkingMode: val as any } })}
+          options={[
+            { label: '自动', value: 'auto' },
+            { label: '关闭', value: 'off' },
+            { label: '低', value: 'low' },
+            { label: '高', value: 'high' },
+          ]}
+          className={selectClass}
+        />
+      </label>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="text-gray-400 dark:text-gray-500 ml-1">安全</span>
+        <Select
+          value={geminiParams.safetyLevel}
+          onChange={(val) => setParams({ gemini: { ...geminiParams, safetyLevel: val as any } })}
+          options={[
+            { label: '默认', value: 'default' },
+            { label: '严格', value: 'strict' },
+            { label: '均衡', value: 'balanced' },
+            { label: '宽松', value: 'relaxed' },
+          ]}
+          className={selectClass}
+        />
+      </label>
+      {renderNumberParam()}
     </div>
   )
 
@@ -1309,7 +1411,7 @@ export default function InputBar() {
           <div className="mt-3">
             {/* 桌面端布局 */}
             <div className="hidden sm:flex items-end justify-between gap-3">
-              {renderParams('grid-cols-6')}
+              {isGeminiProvider ? renderGeminiParams('grid-cols-5') : renderParams('grid-cols-6')}
 
               <div className="flex gap-2 flex-shrink-0 mb-0.5">
                 <div
@@ -1357,7 +1459,7 @@ export default function InputBar() {
             <div className="sm:hidden flex flex-col gap-2">
               <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
                 <div className="collapse-inner">
-                  {renderParams('grid-cols-2')}
+                  {isGeminiProvider ? renderGeminiParams('grid-cols-2') : renderParams('grid-cols-2')}
                   <div className="h-2" />
                 </div>
               </div>
@@ -1398,7 +1500,7 @@ export default function InputBar() {
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                     </svg>
-                    {!prompt.trim() ? '请输入提示词' : hasInsufficientPoints ? '积分不足' : maskDraft ? '遮罩编辑' : '生成图像'}
+                    {!prompt.trim() ? '请输入提示词' : hasUnsupportedGeminiMask ? '不支持遮罩' : hasInsufficientPoints ? '积分不足' : maskDraft ? '遮罩编辑' : '生成图像'}
                   </button>
                 </div>
               </div>

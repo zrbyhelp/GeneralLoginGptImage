@@ -389,6 +389,10 @@ function isOpenAITask(task: TaskRecord) {
   return (task.apiProvider ?? 'openai') === 'openai'
 }
 
+function isGeminiModel(model?: PublicGenerationModel | null) {
+  return model?.provider === 'google-gemini'
+}
+
 function isTaskInFlight(task: TaskRecord) {
   return task.status === 'queued' || task.status === 'running'
 }
@@ -790,6 +794,11 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     return
   }
 
+  if (isGeminiModel(selectedModel) && maskDraft) {
+    showToast('Google Gemini 暂不支持遮罩编辑，请先清除遮罩', 'error')
+    return
+  }
+
   const initialNormalizedParams = normalizeParamsForSettings(params, selectedModel)
   const initialPricing = estimateTaskPricing({
     model: selectedModel,
@@ -882,7 +891,7 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     id: taskId,
     prompt: prompt.trim(),
     params: normalizedParams,
-    apiProvider: 'openai',
+    apiProvider: selectedModel.provider,
     modelId: selectedModel.id,
     apiProfileName: selectedModel.name,
     apiModel: selectedModel.model,
@@ -1058,7 +1067,7 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
 
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord, options: { confirmed?: boolean } = {}) {
-  const { settings, setConfirmDialog } = useStore.getState()
+  const { settings, setConfirmDialog, showToast } = useStore.getState()
   if (!options.confirmed) {
     setConfirmDialog({
       title: '确认重试生成？',
@@ -1075,6 +1084,10 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
   const uploadToGallery = getTaskUploadToGallery(task)
   const modelId = getTaskModelId(task)
   const selectedModel = getAvailableModels().find((model) => model.id === modelId)
+  if (isGeminiModel(selectedModel) && task.maskImageId) {
+    showToast('Google Gemini 暂不支持遮罩编辑，无法直接重试这条遮罩任务', 'error')
+    return
+  }
   const normalizedParams = normalizeParamsForSettings(task.params, selectedModel)
   const pricing = estimateTaskPricing({
     model: selectedModel,
@@ -1087,7 +1100,7 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
     id: taskId,
     prompt: task.prompt,
     params: normalizedParams,
-    apiProvider: 'openai',
+    apiProvider: selectedModel?.provider ?? task.apiProvider ?? 'openai',
     modelId,
     apiProfileName: selectedModel?.name ?? task.apiProfileName ?? '默认模型',
     apiModel: selectedModel?.model ?? task.apiModel ?? '服务端模型',

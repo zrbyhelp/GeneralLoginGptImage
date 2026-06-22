@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../../../src/types'
-import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../../src/lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../../src/lib/pricing'
 import type { AdminSettings } from '../../utils/admin-settings'
 import type { AppUser } from '../../utils/auth'
 
@@ -58,9 +58,32 @@ const tieredModel = {
   pricingMode: 'tiered' as const,
 }
 
+const geminiModel = {
+  ...flatModel,
+  id: 'gemini',
+  name: 'Google Gemini',
+  provider: 'google-gemini' as const,
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  model: 'gemini-3.1-flash-image',
+  apiMode: 'generateContent' as const,
+  pricingMode: 'tiered' as const,
+  pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
+  geminiDefaults: {
+    topP: null,
+    topK: null,
+    maxOutputTokens: null,
+    seed: null,
+    responseMimeType: '',
+    imageConfig: null,
+    generationConfig: null,
+    thinkingConfig: null,
+    safetySettings: null,
+  },
+}
+
 function settings(): AdminSettings {
   return {
-    models: [flatModel, tieredModel],
+    models: [flatModel, tieredModel, geminiModel],
     defaultModelId: flatModel.id,
     dailyPointsTarget: 100,
     standardPointCost: 9,
@@ -177,5 +200,98 @@ describe('/api/images/generate', () => {
         totalPoints: 9,
       }),
     }))
+  })
+
+  it('accepts only simplified Gemini params and recalculates Gemini pricing', async () => {
+    readBodyMock.mockResolvedValue({
+      prompt: 'prompt',
+      modelId: geminiModel.id,
+      params: {
+        ...DEFAULT_PARAMS,
+        size: '4096x4096',
+        quality: 'high',
+        output_format: 'webp',
+        output_compression: 90,
+        moderation: 'low',
+        n: 2,
+        gemini: {
+          mediaResolution: 'high',
+          temperature: 0.7,
+          thinkingMode: 'low',
+          safetyLevel: 'balanced',
+        },
+      },
+      inputImageDataUrls: ['data:image/png;base64,input'],
+      uploadToGallery: false,
+    })
+
+    const handler = await loadHandler()
+    await handler({})
+
+    expect(queueMocks.createImageGenerationJob).toHaveBeenCalledWith(expect.objectContaining({
+      apiConfig: geminiModel,
+      params: expect.objectContaining({
+        size: 'auto',
+        quality: 'auto',
+        output_format: 'png',
+        output_compression: null,
+        moderation: 'auto',
+        n: 2,
+        gemini: {
+          mediaResolution: 'high',
+          temperature: 0.7,
+          thinkingMode: 'low',
+          safetyLevel: 'balanced',
+        },
+      }),
+      pricing: expect.objectContaining({
+        mode: 'tiered',
+        sizeTier: '4K',
+        quality: 'auto',
+        basePoints: 160000,
+        referenceImagePoints: 4000,
+        pointsPerImage: 164000,
+        totalPoints: 328000,
+      }),
+    }))
+  })
+
+  it('rejects unsupported Gemini advanced params from clients', async () => {
+    readBodyMock.mockResolvedValue({
+      prompt: 'prompt',
+      modelId: geminiModel.id,
+      params: {
+        ...DEFAULT_PARAMS,
+        gemini: {
+          mediaResolution: 'auto',
+          topP: 0.9,
+        },
+      },
+    })
+
+    const handler = await loadHandler()
+
+    await expect(handler({})).rejects.toMatchObject({
+      statusCode: 400,
+      statusMessage: expect.stringContaining('topP'),
+    })
+    expect(queueMocks.createImageGenerationJob).not.toHaveBeenCalled()
+  })
+
+  it('rejects Gemini mask editing before queue reservation', async () => {
+    readBodyMock.mockResolvedValue({
+      prompt: 'prompt',
+      modelId: geminiModel.id,
+      params: { ...DEFAULT_PARAMS },
+      maskDataUrl: 'data:image/png;base64,mask',
+    })
+
+    const handler = await loadHandler()
+
+    await expect(handler({})).rejects.toMatchObject({
+      statusCode: 400,
+      statusMessage: expect.stringContaining('不支持遮罩编辑'),
+    })
+    expect(queueMocks.createImageGenerationJob).not.toHaveBeenCalled()
   })
 })

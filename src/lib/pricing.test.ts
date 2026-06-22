@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_PARAMS, type PublicGenerationModel } from '../types'
 import {
   calculateGenerationPricing,
+  DEFAULT_GEMINI_TIERED_PRICING_RULES,
   DEFAULT_OPENAI_TIERED_PRICING_RULES,
   getSizePricingTier,
 } from './pricing'
@@ -21,6 +22,17 @@ const tieredModel: PublicGenerationModel = {
   ...flatModel,
   id: 'tiered',
   pricingMode: 'tiered',
+}
+
+const geminiModel: PublicGenerationModel = {
+  id: 'gemini',
+  name: 'Gemini',
+  provider: 'google-gemini',
+  model: 'gemini-3.1-flash-image',
+  apiMode: 'generateContent',
+  codexCompatible: false,
+  pricingMode: 'tiered',
+  pricingPreviewRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
 }
 
 describe('generation pricing', () => {
@@ -99,6 +111,28 @@ describe('generation pricing', () => {
     })).toMatchObject({
       pointsPerImage: 1000,
       totalPoints: 1000,
+    })
+  })
+
+  it('prices Gemini tiered template by media resolution instead of exact size', () => {
+    expect(calculateGenerationPricing({
+      model: geminiModel,
+      standardPointCost: 1,
+      params: {
+        ...DEFAULT_PARAMS,
+        size: '4096x4096',
+        quality: 'high',
+        n: 2,
+        gemini: { mediaResolution: 'high', temperature: null, thinkingMode: 'auto', safetyLevel: 'default' },
+      },
+      inputImageCount: 1,
+    })).toMatchObject({
+      sizeTier: '4K',
+      quality: 'auto',
+      basePoints: 160000,
+      referenceImagePoints: 4000,
+      pointsPerImage: 164000,
+      totalPoints: 328000,
     })
   })
 })
