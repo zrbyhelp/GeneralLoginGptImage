@@ -37,7 +37,7 @@ const FORBIDDEN_API_KEYS = new Set([
 const LEGACY_IGNORED_KEYS = new Set(['usePremiumApi'])
 
 const ALLOWED_PARAM_KEYS = new Set(['size', 'quality', 'output_format', 'output_compression', 'moderation', 'n', 'gemini'])
-const ALLOWED_GEMINI_PARAM_KEYS = new Set(['mediaResolution', 'temperature', 'thinkingMode', 'safetyLevel'])
+const ALLOWED_GEMINI_PARAM_KEYS = new Set(['mediaResolution', 'temperature', 'thinkingMode', 'safetyLevel', 'networkSearch'])
 
 function assertNoApiOverrides(record: Record<string, unknown>, label = '请求') {
   for (const key of Object.keys(record)) {

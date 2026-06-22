@@ -51,12 +51,14 @@ export function normalizeGeminiUserParams(input: unknown, fallback: GeminiUserPa
     temperature: normalizeGeminiTemperature(record.temperature ?? fallback.temperature),
     thinkingMode: normalizeGeminiThinkingMode(record.thinkingMode ?? fallback.thinkingMode),
     safetyLevel: normalizeGeminiSafetyLevel(record.safetyLevel ?? fallback.safetyLevel),
+    networkSearch: typeof record.networkSearch === 'boolean' ? record.networkSearch : fallback.networkSearch,
   }
 
   return next.mediaResolution === fallback.mediaResolution &&
     next.temperature === fallback.temperature &&
     next.thinkingMode === fallback.thinkingMode &&
-    next.safetyLevel === fallback.safetyLevel
+    next.safetyLevel === fallback.safetyLevel &&
+    next.networkSearch === fallback.networkSearch
     ? fallback
     : next
 }

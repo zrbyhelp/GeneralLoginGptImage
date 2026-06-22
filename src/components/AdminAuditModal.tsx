@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { AdminModelConfig, ApiMode, ApiProvider, GeminiAdminDefaults, SizePriceTier, TaskParams, TieredPricingRules } from '../types'
+import type { AdminModelConfig, ApiMode, ApiProvider, GeminiAdminDefaults, GeminiMediaResolution, GeminiPricingRules, SizePriceTier, TaskParams, TieredPricingRules } from '../types'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES, normalizeTieredPricingRules } from '../lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES, normalizeGeminiPricingRules, normalizeTieredPricingRules } from '../lib/pricing'
 import { DEFAULT_GEMINI_ADMIN_DEFAULTS, DEFAULT_GEMINI_BASE_URL, DEFAULT_GEMINI_MODEL, normalizeGeminiAdminDefaults } from '../lib/gemini'
 
 type AdminSettings = {
@@ -94,12 +94,25 @@ function patchModel(models: AdminModelConfig[], id: string, patch: Partial<Admin
 
 const PRICE_TIERS: SizePriceTier[] = ['1K', '2K', '4K']
 const PRICE_QUALITIES: Array<TaskParams['quality']> = ['auto', 'low', 'medium', 'high']
+const GEMINI_MEDIA_RESOLUTION_OPTIONS: Array<{ value: GeminiMediaResolution; label: string }> = [
+  { value: 'auto', label: '自动' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+]
 
-function patchPricingRules(
-  rules: TieredPricingRules,
+function patchOpenAIPricingRules(
+  rules: AdminModelConfig['pricingRules'],
   updater: (rules: TieredPricingRules) => TieredPricingRules,
 ) {
   return updater(normalizeTieredPricingRules(rules))
+}
+
+function patchGeminiPricingRules(
+  rules: AdminModelConfig['pricingRules'],
+  updater: (rules: GeminiPricingRules) => GeminiPricingRules,
+) {
+  return updater(normalizeGeminiPricingRules(rules))
 }
 
 function pricingNumber(value: string) {
@@ -226,12 +239,23 @@ export default function AdminAuditModal() {
     })
   }
 
-  function updateModelPricingRule(id: string, patcher: (rules: TieredPricingRules) => TieredPricingRules) {
+  function updateOpenAIPricingRule(id: string, patcher: (rules: TieredPricingRules) => TieredPricingRules) {
     setSettings((prev) => ({
       ...prev,
       models: prev.models.map((model) =>
         model.id === id
-          ? { ...model, pricingRules: patchPricingRules(model.pricingRules, patcher) }
+          ? { ...model, pricingRules: patchOpenAIPricingRules(model.pricingRules, patcher) }
+          : model,
+      ),
+    }))
+  }
+
+  function updateGeminiPricingRule(id: string, patcher: (rules: GeminiPricingRules) => GeminiPricingRules) {
+    setSettings((prev) => ({
+      ...prev,
+      models: prev.models.map((model) =>
+        model.id === id
+          ? { ...model, pricingRules: patchGeminiPricingRules(model.pricingRules, patcher) }
           : model,
       ),
     }))
@@ -255,7 +279,7 @@ export default function AdminAuditModal() {
   }
 
   function updateTierPrice(id: string, tier: SizePriceTier, quality: TaskParams['quality'], value: string) {
-    updateModelPricingRule(id, (rules) => ({
+    updateOpenAIPricingRule(id, (rules) => ({
       ...rules,
       sizeQualityPoints: {
         ...rules.sizeQualityPoints,
@@ -268,7 +292,26 @@ export default function AdminAuditModal() {
   }
 
   function updatePricingNumber(id: string, key: keyof Pick<TieredPricingRules, 'referenceImagePoints' | 'maskEditPoints' | 'minimumPoints'>, value: string) {
-    updateModelPricingRule(id, (rules) => ({
+    updateOpenAIPricingRule(id, (rules) => ({
+      ...rules,
+      [key]: key === 'minimumPoints'
+        ? Math.max(1, pricingNumber(value))
+        : pricingNumber(value),
+    }))
+  }
+
+  function updateGeminiMediaResolutionPrice(id: string, resolution: GeminiMediaResolution, value: string) {
+    updateGeminiPricingRule(id, (rules) => ({
+      ...rules,
+      mediaResolutionPoints: {
+        ...rules.mediaResolutionPoints,
+        [resolution]: Math.max(1, pricingNumber(value)),
+      },
+    }))
+  }
+
+  function updateGeminiPricingNumber(id: string, key: keyof Pick<GeminiPricingRules, 'referenceImagePoints' | 'minimumPoints' | 'searchGroundingPointsPerCount' | 'searchGroundingEstimatedCountPerImage'>, value: string) {
+    updateGeminiPricingRule(id, (rules) => ({
       ...rules,
       [key]: key === 'minimumPoints'
         ? Math.max(1, pricingNumber(value))
@@ -359,10 +402,9 @@ export default function AdminAuditModal() {
             </div>
             <div className="space-y-4">
               {settings.models.map((model, index) => {
-                const providerPricingTemplate = model.provider === 'google-gemini'
-                  ? DEFAULT_GEMINI_TIERED_PRICING_RULES
-                  : DEFAULT_OPENAI_TIERED_PRICING_RULES
-                const pricingRules = normalizeTieredPricingRules(model.pricingRules, providerPricingTemplate)
+                const isGemini = model.provider === 'google-gemini'
+                const openAIPricingRules = normalizeTieredPricingRules(model.pricingRules)
+                const geminiPricingRules = normalizeGeminiPricingRules(model.pricingRules)
                 const geminiDefaults = normalizeGeminiAdminDefaults(model.geminiDefaults)
                 return (
                 <div key={model.id} className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -496,7 +538,7 @@ export default function AdminAuditModal() {
                       <div>
                         <h5 className="text-xs font-medium text-gray-700 dark:text-gray-200">计费方式</h5>
                         <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
-                          固定单价使用上方“单张消耗”；阶梯计费按尺寸、质量、参考图和遮罩预扣。
+                          固定单价使用上方“单张消耗”；阶梯计费按当前供应商的规格表预扣。
                         </p>
                       </div>
                       <div className="flex rounded-xl bg-white/70 p-1 text-xs dark:bg-white/[0.04]">
@@ -522,57 +564,101 @@ export default function AdminAuditModal() {
                         <div className="flex justify-end">
                           <button
                             type="button"
-                            onClick={() => updateModel(model.id, { pricingRules: providerPricingTemplate })}
+                            onClick={() => updateModel(model.id, {
+                              pricingRules: isGemini
+                                ? DEFAULT_GEMINI_TIERED_PRICING_RULES
+                                : DEFAULT_OPENAI_TIERED_PRICING_RULES,
+                            })}
                             className="rounded-lg border border-blue-200 bg-white/70 px-2.5 py-1 text-xs font-medium text-blue-600 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-white/[0.04] dark:text-blue-300 dark:hover:bg-blue-500/10"
                           >
-                            填充{model.provider === 'google-gemini' ? ' Gemini' : '官方 OpenAI'}保守模板
+                            填充{isGemini ? ' Gemini 媒体精度' : '官方 OpenAI'}保守模板
                           </button>
                         </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full min-w-[560px] border-separate border-spacing-0 text-xs">
-                            <thead>
-                              <tr className="text-left text-gray-400 dark:text-gray-500">
-                                <th className="px-2 py-1 font-medium">尺寸档</th>
-                                {PRICE_QUALITIES.map((quality) => (
-                                  <th key={quality} className="px-2 py-1 font-medium">{quality}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {PRICE_TIERS.map((tier) => (
-                                <tr key={tier}>
-                                  <td className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">{tier}</td>
-                                  {PRICE_QUALITIES.map((quality) => (
-                                    <td key={`${tier}-${quality}`} className="px-2 py-1.5">
-                                      <input
-                                        value={pricingRules.sizeQualityPoints[tier][quality]}
-                                        onChange={(event) => updateTierPrice(model.id, tier, quality, event.target.value)}
-                                        min={1}
-                                        max={1000000}
-                                        type="number"
-                                        className="w-full rounded-lg border border-gray-200 bg-white/70 px-2 py-1 text-xs dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
-                                      />
-                                    </td>
-                                  ))}
-                                </tr>
+                        {isGemini ? (
+                          <>
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                              {GEMINI_MEDIA_RESOLUTION_OPTIONS.map((option) => (
+                                <label key={option.value} className="block">
+                                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">媒体精度：{option.label}</span>
+                                  <input
+                                    value={geminiPricingRules.mediaResolutionPoints[option.value]}
+                                    onChange={(event) => updateGeminiMediaResolutionPrice(model.id, option.value, event.target.value)}
+                                    min={1}
+                                    max={1000000}
+                                    type="number"
+                                    className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                                  />
+                                </label>
                               ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <label className="block">
-                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每张参考图加价</span>
-                            <input value={pricingRules.referenceImagePoints} onChange={(event) => updatePricingNumber(model.id, 'referenceImagePoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
-                          </label>
-                          <label className="block">
-                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">遮罩编辑加价</span>
-                            <input value={pricingRules.maskEditPoints} onChange={(event) => updatePricingNumber(model.id, 'maskEditPoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
-                          </label>
-                          <label className="block">
-                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">最低扣费</span>
-                            <input value={pricingRules.minimumPoints} onChange={(event) => updatePricingNumber(model.id, 'minimumPoints', event.target.value)} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
-                          </label>
-                        </div>
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每张参考图加价</span>
+                                <input value={geminiPricingRules.referenceImagePoints} onChange={(event) => updateGeminiPricingNumber(model.id, 'referenceImagePoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">最低扣费</span>
+                                <input value={geminiPricingRules.minimumPoints} onChange={(event) => updateGeminiPricingNumber(model.id, 'minimumPoints', event.target.value)} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">网络搜索每 count 积分</span>
+                                <input value={geminiPricingRules.searchGroundingPointsPerCount} onChange={(event) => updateGeminiPricingNumber(model.id, 'searchGroundingPointsPerCount', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">网络搜索预估次数/张</span>
+                                <input value={geminiPricingRules.searchGroundingEstimatedCountPerImage} onChange={(event) => updateGeminiPricingNumber(model.id, 'searchGroundingEstimatedCountPerImage', event.target.value)} min={0} max={1000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[560px] border-separate border-spacing-0 text-xs">
+                                <thead>
+                                  <tr className="text-left text-gray-400 dark:text-gray-500">
+                                    <th className="px-2 py-1 font-medium">尺寸档</th>
+                                    {PRICE_QUALITIES.map((quality) => (
+                                      <th key={quality} className="px-2 py-1 font-medium">{quality}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {PRICE_TIERS.map((tier) => (
+                                    <tr key={tier}>
+                                      <td className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">{tier}</td>
+                                      {PRICE_QUALITIES.map((quality) => (
+                                        <td key={`${tier}-${quality}`} className="px-2 py-1.5">
+                                          <input
+                                            value={openAIPricingRules.sizeQualityPoints[tier][quality]}
+                                            onChange={(event) => updateTierPrice(model.id, tier, quality, event.target.value)}
+                                            min={1}
+                                            max={1000000}
+                                            type="number"
+                                            className="w-full rounded-lg border border-gray-200 bg-white/70 px-2 py-1 text-xs dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                                          />
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每张参考图加价</span>
+                                <input value={openAIPricingRules.referenceImagePoints} onChange={(event) => updatePricingNumber(model.id, 'referenceImagePoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">遮罩编辑加价</span>
+                                <input value={openAIPricingRules.maskEditPoints} onChange={(event) => updatePricingNumber(model.id, 'maskEditPoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">最低扣费</span>
+                                <input value={openAIPricingRules.minimumPoints} onChange={(event) => updatePricingNumber(model.id, 'minimumPoints', event.target.value)} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                              </label>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

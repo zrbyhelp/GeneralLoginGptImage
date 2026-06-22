@@ -17,6 +17,7 @@ export interface ServerImageApiResult {
   actualParamsList?: Array<Partial<TaskParams> | undefined>
   revisedPrompts?: Array<string | undefined>
   partialError?: string | null
+  searchGroundingCount?: number
 }
 
 const MIME_MAP: Record<string, string> = {
@@ -155,6 +156,7 @@ function mergeConcurrentResults(results: PromiseSettledResult<ServerImageApiResu
     actualParamsList: successful.flatMap((result) => result.actualParamsList ?? result.images.map(() => result.actualParams)),
     revisedPrompts: successful.flatMap((result) => result.revisedPrompts ?? result.images.map(() => undefined)),
     partialError: errors.length ? errors.join('\n') : null,
+    searchGroundingCount: successful.reduce((sum, result) => sum + Math.max(0, Math.floor(Number(result.searchGroundingCount) || 0)), 0),
   }
 }
 
@@ -344,6 +346,28 @@ function parseGeminiImageResults(payload: unknown) {
   return images
 }
 
+function parseGeminiSearchGroundingCount(payload: unknown) {
+  const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+  const candidates = Array.isArray(record.candidates) ? record.candidates : []
+  const queries = new Set<string>()
+  for (const candidate of candidates) {
+    const candidateRecord = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : {}
+    const metadata = candidateRecord.groundingMetadata && typeof candidateRecord.groundingMetadata === 'object'
+      ? candidateRecord.groundingMetadata as Record<string, unknown>
+      : candidateRecord.grounding_metadata && typeof candidateRecord.grounding_metadata === 'object'
+        ? candidateRecord.grounding_metadata as Record<string, unknown>
+        : null
+    const webSearchQueries = metadata
+      ? metadata.webSearchQueries ?? metadata.web_search_queries
+      : undefined
+    if (!Array.isArray(webSearchQueries)) continue
+    for (const query of webSearchQueries) {
+      if (typeof query === 'string' && query.trim()) queries.add(query.trim())
+    }
+  }
+  return queries.size
+}
+
 async function callGeminiGenerateContentApi(opts: {
   config: ServerApiConfig
   prompt: string
@@ -373,6 +397,7 @@ async function callGeminiGenerateContentApi(opts: {
     contents: [{ role: 'user', parts }],
     generationConfig: createGeminiGenerationConfig(opts.params, opts.config.geminiDefaults),
     safetySettings,
+    tools: opts.params.gemini?.networkSearch ? [{ google_search: {} }] : undefined,
   })
 
   const controller = new AbortController()
@@ -392,13 +417,18 @@ async function callGeminiGenerateContentApi(opts: {
     })
 
     if (!response.ok) throw new Error(await getApiErrorMessage(response))
-    const images = parseGeminiImageResults(await response.json())
+    const payload = await response.json()
+    const images = parseGeminiImageResults(payload)
+    const searchGroundingCount = opts.params.gemini?.networkSearch
+      ? parseGeminiSearchGroundingCount(payload)
+      : 0
     const actualParams = mergeActualParams({ n: images.length, gemini: opts.params.gemini })
     return {
       images,
       actualParams,
       actualParamsList: images.map(() => actualParams),
       revisedPrompts: images.map(() => undefined),
+      searchGroundingCount,
     }
   } finally {
     clearTimeout(timeoutId)

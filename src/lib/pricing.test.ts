@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PARAMS, type PublicGenerationModel } from '../types'
+import { DEFAULT_PARAMS, type PublicGenerationModel, type TaskParams } from '../types'
 import {
   calculateGenerationPricing,
+  calculateActualGenerationPricing,
   DEFAULT_GEMINI_TIERED_PRICING_RULES,
   DEFAULT_OPENAI_TIERED_PRICING_RULES,
   getSizePricingTier,
@@ -123,16 +124,117 @@ describe('generation pricing', () => {
         size: '4096x4096',
         quality: 'high',
         n: 2,
-        gemini: { mediaResolution: 'high', temperature: null, thinkingMode: 'auto', safetyLevel: 'default' },
+        gemini: { mediaResolution: 'high', temperature: null, thinkingMode: 'auto', safetyLevel: 'default', networkSearch: false },
       },
       inputImageCount: 1,
     })).toMatchObject({
-      sizeTier: '4K',
-      quality: 'auto',
-      basePoints: 160000,
-      referenceImagePoints: 4000,
-      pointsPerImage: 164000,
-      totalPoints: 328000,
+      mediaResolution: 'high',
+      basePoints: 65000,
+      referenceImagePoints: 1500,
+      maskEditApplied: false,
+      maskEditPoints: 0,
+      pointsPerImage: 66500,
+      totalPoints: 133000,
+    })
+  })
+
+  it('resets legacy Gemini size-quality pricing rules to the media-resolution defaults', () => {
+    const pricing = calculateGenerationPricing({
+      model: {
+        ...geminiModel,
+        pricingPreviewRules: {
+          sizeQualityPoints: {
+            '1K': { auto: 1, low: 1, medium: 1, high: 1 },
+            '2K': { auto: 1, low: 1, medium: 1, high: 1 },
+            '4K': { auto: 999999, low: 999999, medium: 999999, high: 999999 },
+          },
+          referenceImagePoints: 999999,
+          maskEditPoints: 999999,
+          minimumPoints: 999999,
+        },
+      },
+      standardPointCost: 1,
+      params: {
+        ...DEFAULT_PARAMS,
+        n: 1,
+        gemini: { mediaResolution: 'auto', temperature: null, thinkingMode: 'auto', safetyLevel: 'default', networkSearch: false },
+      },
+    })
+
+    expect(pricing).toMatchObject({
+      mediaResolution: 'auto',
+      basePoints: 35000,
+      referenceImagePoints: 0,
+      minimumPoints: 10000,
+      pointsPerImage: 35000,
+      totalPoints: 35000,
+    })
+  })
+
+  it('applies custom Gemini media-resolution rules and minimum charge', () => {
+    expect(calculateGenerationPricing({
+      model: {
+        ...geminiModel,
+        pricingPreviewRules: {
+          mediaResolutionPoints: { auto: 5, low: 5, medium: 5, high: 5 },
+          referenceImagePoints: 2,
+          minimumPoints: 100,
+          searchGroundingPointsPerCount: 10,
+          searchGroundingEstimatedCountPerImage: 5,
+        },
+      },
+      standardPointCost: 1,
+      params: {
+        ...DEFAULT_PARAMS,
+        n: 3,
+        gemini: { mediaResolution: 'low', temperature: null, thinkingMode: 'auto', safetyLevel: 'default', networkSearch: false },
+      },
+      inputImageCount: 4,
+    })).toMatchObject({
+      mediaResolution: 'low',
+      basePoints: 5,
+      referenceImagePoints: 8,
+      pointsPerImage: 100,
+      totalPoints: 300,
+    })
+  })
+
+  it('adds Gemini network search estimated points and recalculates by actual count', () => {
+    const params = {
+      ...DEFAULT_PARAMS,
+      n: 2,
+      gemini: { mediaResolution: 'medium', temperature: null, thinkingMode: 'auto', safetyLevel: 'default', networkSearch: true },
+    } satisfies TaskParams
+    const preview = calculateGenerationPricing({
+      model: geminiModel,
+      standardPointCost: 1,
+      params,
+      inputImageCount: 0,
+    })
+
+    expect(preview).toMatchObject({
+      mediaResolution: 'medium',
+      basePoints: 35000,
+      searchGroundingEnabled: true,
+      searchGroundingEstimatedCount: 5,
+      searchGroundingPointsPerCount: 1200,
+      searchGroundingEstimatedPoints: 6000,
+      pointsPerImage: 41000,
+      totalPoints: 82000,
+    })
+
+    expect(calculateActualGenerationPricing({
+      model: geminiModel,
+      standardPointCost: 1,
+      params,
+      inputImageCount: 0,
+      successfulImageCount: 2,
+      actualSearchGroundingCount: 3,
+    })).toMatchObject({
+      imageCount: 2,
+      searchGroundingActualCount: 3,
+      searchGroundingActualPoints: 3600,
+      totalPoints: 73600,
     })
   })
 })

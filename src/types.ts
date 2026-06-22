@@ -6,6 +6,7 @@ export type PricingMode = 'flat' | 'tiered'
 export type SizePriceTier = '1K' | '2K' | '4K'
 export type QualityPricePoints = Record<TaskParams['quality'], number>
 export type GeminiMediaResolution = 'auto' | 'low' | 'medium' | 'high'
+export type GeminiMediaResolutionPoints = Record<GeminiMediaResolution, number>
 export type GeminiThinkingMode = 'auto' | 'off' | 'low' | 'high'
 export type GeminiSafetyLevel = 'default' | 'strict' | 'balanced' | 'relaxed'
 
@@ -14,6 +15,7 @@ export interface GeminiUserParams {
   temperature: number | null
   thinkingMode: GeminiThinkingMode
   safetyLevel: GeminiSafetyLevel
+  networkSearch: boolean
 }
 
 export interface GeminiAdminDefaults {
@@ -35,13 +37,30 @@ export interface TieredPricingRules {
   minimumPoints: number
 }
 
+export interface GeminiPricingRules {
+  mediaResolutionPoints: GeminiMediaResolutionPoints
+  referenceImagePoints: number
+  minimumPoints: number
+  searchGroundingPointsPerCount: number
+  searchGroundingEstimatedCountPerImage: number
+}
+
+export type ModelPricingRules = TieredPricingRules | GeminiPricingRules
+
 export interface PricingBreakdown {
   mode: PricingMode
   sizeTier?: SizePriceTier
   quality?: TaskParams['quality']
+  mediaResolution?: GeminiMediaResolution
   basePoints: number
   referenceImageCount: number
   referenceImagePoints: number
+  searchGroundingEnabled?: boolean
+  searchGroundingEstimatedCount?: number
+  searchGroundingActualCount?: number
+  searchGroundingPointsPerCount?: number
+  searchGroundingEstimatedPoints?: number
+  searchGroundingActualPoints?: number
   maskEditApplied: boolean
   maskEditPoints: number
   minimumPoints: number
@@ -63,7 +82,7 @@ export interface AdminModelConfig {
   geminiDefaults?: GeminiAdminDefaults
   enabled: boolean
   pricingMode: PricingMode
-  pricingRules: TieredPricingRules
+  pricingRules: ModelPricingRules
 }
 
 export interface PublicGenerationModel {
@@ -74,7 +93,7 @@ export interface PublicGenerationModel {
   apiMode: ApiMode
   codexCompatible: boolean
   pricingMode: PricingMode
-  pricingPreviewRules: TieredPricingRules
+  pricingPreviewRules: ModelPricingRules
 }
 
 export interface ApiProfile {
@@ -128,6 +147,7 @@ export const DEFAULT_PARAMS: TaskParams = {
     temperature: null,
     thinkingMode: 'auto',
     safetyLevel: 'default',
+    networkSearch: false,
   },
 }
 

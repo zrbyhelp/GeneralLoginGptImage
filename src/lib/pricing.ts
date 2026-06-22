@@ -1,5 +1,9 @@
 import type {
   AdminModelConfig,
+  ApiProvider,
+  GeminiMediaResolution,
+  GeminiPricingRules,
+  ModelPricingRules,
   PricingBreakdown,
   PricingMode,
   PublicGenerationModel,
@@ -12,6 +16,7 @@ import { normalizeImageSize } from './size'
 
 const QUALITIES: Array<TaskParams['quality']> = ['auto', 'low', 'medium', 'high']
 const SIZE_TIERS: SizePriceTier[] = ['1K', '2K', '4K']
+const GEMINI_MEDIA_RESOLUTIONS: GeminiMediaResolution[] = ['auto', 'low', 'medium', 'high']
 
 export const DEFAULT_OPENAI_TIERED_PRICING_RULES: TieredPricingRules = {
   sizeQualityPoints: {
@@ -24,21 +29,23 @@ export const DEFAULT_OPENAI_TIERED_PRICING_RULES: TieredPricingRules = {
   minimumPoints: 1000,
 }
 
-export const DEFAULT_GEMINI_TIERED_PRICING_RULES: TieredPricingRules = {
-  sizeQualityPoints: {
-    '1K': { low: 4000, medium: 12000, high: 72000, auto: 20000 },
-    '2K': { low: 16000, medium: 48000, high: 288000, auto: 80000 },
-    '4K': { low: 32000, medium: 96000, high: 580000, auto: 160000 },
+export const DEFAULT_GEMINI_TIERED_PRICING_RULES: GeminiPricingRules = {
+  mediaResolutionPoints: {
+    auto: 35000,
+    low: 15000,
+    medium: 35000,
+    high: 65000,
   },
-  referenceImagePoints: 4000,
-  maskEditPoints: 0,
-  minimumPoints: 4000,
+  referenceImagePoints: 1500,
+  minimumPoints: 10000,
+  searchGroundingPointsPerCount: 1200,
+  searchGroundingEstimatedCountPerImage: 5,
 }
 
 type PricedModel = Pick<AdminModelConfig | PublicGenerationModel, 'pricingMode'> & {
   provider?: AdminModelConfig['provider'] | PublicGenerationModel['provider']
-  pricingRules?: TieredPricingRules
-  pricingPreviewRules?: TieredPricingRules
+  pricingRules?: ModelPricingRules
+  pricingPreviewRules?: ModelPricingRules
 }
 
 export interface PricingInput {
@@ -88,6 +95,58 @@ export function normalizeTieredPricingRules(
   }
 }
 
+function normalizeGeminiMediaResolutionPoints(input: unknown, fallback: GeminiPricingRules['mediaResolutionPoints']) {
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+  return GEMINI_MEDIA_RESOLUTIONS.reduce((acc, resolution) => {
+    acc[resolution] = parsePositiveInt(record[resolution], fallback[resolution], 1, 1_000_000)
+    return acc
+  }, {} as GeminiPricingRules['mediaResolutionPoints'])
+}
+
+export function normalizeGeminiPricingRules(input: unknown): GeminiPricingRules {
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+  if (!record.mediaResolutionPoints || typeof record.mediaResolutionPoints !== 'object') {
+    return DEFAULT_GEMINI_TIERED_PRICING_RULES
+  }
+
+  return {
+    mediaResolutionPoints: normalizeGeminiMediaResolutionPoints(
+      record.mediaResolutionPoints,
+      DEFAULT_GEMINI_TIERED_PRICING_RULES.mediaResolutionPoints,
+    ),
+    referenceImagePoints: parsePositiveInt(
+      record.referenceImagePoints,
+      DEFAULT_GEMINI_TIERED_PRICING_RULES.referenceImagePoints,
+      0,
+      1_000_000,
+    ),
+    minimumPoints: parsePositiveInt(
+      record.minimumPoints,
+      DEFAULT_GEMINI_TIERED_PRICING_RULES.minimumPoints,
+      1,
+      1_000_000,
+    ),
+    searchGroundingPointsPerCount: parsePositiveInt(
+      record.searchGroundingPointsPerCount,
+      DEFAULT_GEMINI_TIERED_PRICING_RULES.searchGroundingPointsPerCount,
+      0,
+      1_000_000,
+    ),
+    searchGroundingEstimatedCountPerImage: parsePositiveInt(
+      record.searchGroundingEstimatedCountPerImage,
+      DEFAULT_GEMINI_TIERED_PRICING_RULES.searchGroundingEstimatedCountPerImage,
+      0,
+      1000,
+    ),
+  }
+}
+
+export function normalizePricingRulesForProvider(input: unknown, provider?: ApiProvider): ModelPricingRules {
+  return provider === 'google-gemini'
+    ? normalizeGeminiPricingRules(input)
+    : normalizeTieredPricingRules(input)
+}
+
 function parseSizePixels(size: string) {
   const normalized = normalizeImageSize(size)
   const match = normalized.match(/^(\d+)x(\d+)$/)
@@ -106,30 +165,91 @@ export function getSizePricingTier(size: string): SizePriceTier {
   return '4K'
 }
 
-function getDefaultPricingRules(model?: PricedModel | null) {
-  return model?.provider === 'google-gemini'
-    ? DEFAULT_GEMINI_TIERED_PRICING_RULES
-    : DEFAULT_OPENAI_TIERED_PRICING_RULES
-}
-
 function normalizeTieredPricingRulesWithFallback(input: unknown, fallback: TieredPricingRules): TieredPricingRules {
   const normalized = normalizeTieredPricingRules(input, fallback)
   if (input == null) return fallback
   return normalized
 }
 
-function getPricingRules(model?: PricedModel | null) {
+function getOpenAIPricingRules(model?: PricedModel | null) {
   return normalizeTieredPricingRulesWithFallback(
     model?.pricingRules ?? model?.pricingPreviewRules,
-    getDefaultPricingRules(model),
+    DEFAULT_OPENAI_TIERED_PRICING_RULES,
   )
 }
 
-function getGeminiMediaResolutionPricingTier(params: TaskParams): SizePriceTier {
-  const mediaResolution = params.gemini?.mediaResolution ?? DEFAULT_PARAMS.gemini?.mediaResolution ?? 'auto'
-  if (mediaResolution === 'low') return '1K'
-  if (mediaResolution === 'high') return '4K'
-  return '2K'
+function getGeminiPricingRules(model?: PricedModel | null) {
+  return normalizeGeminiPricingRules(model?.pricingRules ?? model?.pricingPreviewRules)
+}
+
+function getGeminiMediaResolution(params: TaskParams): GeminiMediaResolution {
+  return params.gemini?.mediaResolution ?? DEFAULT_PARAMS.gemini?.mediaResolution ?? 'auto'
+}
+
+function createGeminiPricingBreakdown(input: {
+  mode: PricingMode
+  rules: GeminiPricingRules
+  params: TaskParams
+  imageCount: number
+  referenceImageCount: number
+  actualSearchGroundingCount?: number
+}): PricingBreakdown {
+  const mediaResolution = getGeminiMediaResolution(input.params)
+  const basePoints = parsePositiveInt(
+    input.rules.mediaResolutionPoints[mediaResolution],
+    DEFAULT_GEMINI_TIERED_PRICING_RULES.mediaResolutionPoints[mediaResolution],
+    1,
+    1_000_000,
+  )
+  const referenceImagePoints = input.referenceImageCount * input.rules.referenceImagePoints
+  const searchGroundingEnabled = Boolean(input.params.gemini?.networkSearch)
+  const searchGroundingPointsPerCount = input.rules.searchGroundingPointsPerCount
+  const searchGroundingEstimatedCount = searchGroundingEnabled
+    ? input.rules.searchGroundingEstimatedCountPerImage
+    : 0
+  const hasActualSearchGroundingCount = typeof input.actualSearchGroundingCount === 'number'
+  const searchGroundingActualCount = searchGroundingEnabled && hasActualSearchGroundingCount
+    ? Math.max(0, Math.floor(Number(input.actualSearchGroundingCount) || 0))
+    : undefined
+  const chargedSearchGroundingCount = hasActualSearchGroundingCount
+    ? searchGroundingActualCount ?? 0
+    : searchGroundingEstimatedCount
+  const searchGroundingEstimatedPoints = searchGroundingEstimatedCount * searchGroundingPointsPerCount
+  const searchGroundingActualPoints = searchGroundingActualCount == null
+    ? undefined
+    : searchGroundingActualCount * searchGroundingPointsPerCount
+  const fixedSubtotal = basePoints + referenceImagePoints
+  const searchGroundingPoints = chargedSearchGroundingCount * searchGroundingPointsPerCount
+  const estimatedSubtotal = fixedSubtotal + searchGroundingEstimatedPoints
+  const estimatedPointsPerImage = Math.max(input.rules.minimumPoints, estimatedSubtotal)
+  const actualTotalPoints = hasActualSearchGroundingCount
+    ? input.imageCount > 0
+      ? Math.max(input.rules.minimumPoints * input.imageCount, fixedSubtotal * input.imageCount + searchGroundingPoints)
+      : 0
+    : estimatedPointsPerImage * input.imageCount
+  const pointsPerImage = hasActualSearchGroundingCount && input.imageCount > 0
+    ? Math.ceil(actualTotalPoints / input.imageCount)
+    : estimatedPointsPerImage
+
+  return {
+    mode: input.mode,
+    mediaResolution,
+    basePoints,
+    referenceImageCount: input.referenceImageCount,
+    referenceImagePoints,
+    searchGroundingEnabled,
+    searchGroundingEstimatedCount,
+    searchGroundingActualCount,
+    searchGroundingPointsPerCount,
+    searchGroundingEstimatedPoints,
+    searchGroundingActualPoints,
+    maskEditApplied: false,
+    maskEditPoints: 0,
+    minimumPoints: input.rules.minimumPoints,
+    pointsPerImage,
+    imageCount: input.imageCount,
+    totalPoints: actualTotalPoints,
+  }
 }
 
 export function calculateGenerationPricing(input: PricingInput): PricingBreakdown {
@@ -154,16 +274,23 @@ export function calculateGenerationPricing(input: PricingInput): PricingBreakdow
     }
   }
 
-  const rules = getPricingRules(input.model)
-  const quality = input.model?.provider === 'google-gemini'
-    ? DEFAULT_PARAMS.quality
-    : input.params.quality || DEFAULT_PARAMS.quality
-  const sizeTier = input.model?.provider === 'google-gemini'
-    ? getGeminiMediaResolutionPricingTier(input.params)
-    : getSizePricingTier(input.params.size || DEFAULT_PARAMS.size)
+  if (input.model?.provider === 'google-gemini') {
+    const rules = getGeminiPricingRules(input.model)
+    return createGeminiPricingBreakdown({
+      mode,
+      rules,
+      params: input.params,
+      imageCount,
+      referenceImageCount,
+    })
+  }
+
+  const rules = getOpenAIPricingRules(input.model)
+  const quality = input.params.quality || DEFAULT_PARAMS.quality
+  const sizeTier = getSizePricingTier(input.params.size || DEFAULT_PARAMS.size)
   const basePoints = parsePositiveInt(
     rules.sizeQualityPoints[sizeTier]?.[quality],
-    getDefaultPricingRules(input.model).sizeQualityPoints[sizeTier][quality],
+    DEFAULT_OPENAI_TIERED_PRICING_RULES.sizeQualityPoints[sizeTier][quality],
     1,
     1_000_000,
   )
@@ -186,4 +313,33 @@ export function calculateGenerationPricing(input: PricingInput): PricingBreakdow
     imageCount,
     totalPoints: pointsPerImage * imageCount,
   }
+}
+
+export function calculateActualGenerationPricing(input: PricingInput & {
+  successfulImageCount: number
+  actualSearchGroundingCount?: number
+}): PricingBreakdown {
+  const imageCount = Math.max(0, Math.floor(Number(input.successfulImageCount) || 0))
+  if (input.model?.provider !== 'google-gemini' || normalizePricingMode(input.model?.pricingMode) !== 'tiered') {
+    if (imageCount === 0) {
+      return {
+        ...calculateGenerationPricing({ ...input, imageCount: 1 }),
+        imageCount: 0,
+        totalPoints: 0,
+      }
+    }
+    return {
+      ...calculateGenerationPricing({ ...input, imageCount }),
+      imageCount,
+    }
+  }
+
+  return createGeminiPricingBreakdown({
+    mode: 'tiered',
+    rules: getGeminiPricingRules(input.model),
+    params: input.params,
+    imageCount,
+    referenceImageCount: Math.max(0, Math.floor(Number(input.inputImageCount) || 0)),
+    actualSearchGroundingCount: input.actualSearchGroundingCount,
+  })
 }

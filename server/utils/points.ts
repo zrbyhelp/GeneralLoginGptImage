@@ -265,12 +265,16 @@ export async function settleGenerationPoints(input: {
   reservedPoints: number
   actualImages: number
   costPerImage: number
+  actualPoints?: number
+  capOverageToReserved?: boolean
   referenceId?: string
 }) {
   const reservedPoints = Math.max(0, Math.floor(Number(input.reservedPoints) || 0))
   const actualImages = Math.max(0, Math.floor(Number(input.actualImages) || 0))
   const costPerImage = parsePositiveInt(input.costPerImage, 1, 1, 1_000_000)
-  const actualPoints = actualImages * costPerImage
+  const actualPoints = input.actualPoints == null
+    ? actualImages * costPerImage
+    : Math.max(0, Math.floor(Number(input.actualPoints) || 0))
   const nowIsoValue = nowIso()
   const db = getDb()
 
@@ -283,22 +287,25 @@ export async function settleGenerationPoints(input: {
     if (actualPoints > reservedPoints) {
       const extra = actualPoints - reservedPoints
       if (balance < extra) {
-        throw createError({
-          statusCode: 500,
-          statusMessage: '积分结算失败',
+        if (!input.capOverageToReserved) {
+          throw createError({
+            statusCode: 500,
+            statusMessage: '积分结算失败',
+          })
+        }
+      } else {
+        balance -= extra
+        chargedPoints = actualPoints
+        insertLedger(db, {
+          userId: input.userId,
+          delta: -extra,
+          balanceAfter: balance,
+          reason: 'generation_overage',
+          referenceId: input.referenceId ?? null,
+          note: '生成实际消耗超出预扣值，补扣差额',
+          createdAt: nowIsoValue,
         })
       }
-      balance -= extra
-      chargedPoints = actualPoints
-      insertLedger(db, {
-        userId: input.userId,
-        delta: -extra,
-        balanceAfter: balance,
-        reason: 'generation_overage',
-        referenceId: input.referenceId ?? null,
-        note: '生成结果数量超出预扣值，补扣差额',
-        createdAt: nowIsoValue,
-      })
     } else if (actualPoints < reservedPoints) {
       refundedPoints = reservedPoints - actualPoints
       balance += refundedPoints

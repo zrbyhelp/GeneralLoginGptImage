@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PricingBreakdown, TaskParams } from '../../src/types'
-import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import type { AdminSettings, ServerApiConfig } from './admin-settings'
 import type { AppUser } from './auth'
 import {
@@ -58,6 +58,18 @@ const apiConfig: ServerApiConfig = {
   codexCompatible: false,
   pricingMode: 'flat',
   pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
+}
+
+const geminiApiConfig: ServerApiConfig = {
+  ...apiConfig,
+  id: 'model-gemini',
+  name: 'Gemini',
+  provider: 'google-gemini',
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  model: 'gemini-3.1-flash-image',
+  apiMode: 'generateContent',
+  pricingMode: 'tiered',
+  pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
 }
 
 const params: TaskParams = {
@@ -354,6 +366,83 @@ describe('image generation queue', () => {
       pricingBreakdown: expect.objectContaining({
         pointsPerImage: 72000,
         totalPoints: 144000,
+      }),
+    })
+  })
+
+  it('settles Gemini search grounding by actual counts', async () => {
+    const geminiParams: TaskParams = {
+      ...params,
+      n: 2,
+      gemini: {
+        mediaResolution: 'medium',
+        temperature: null,
+        thinkingMode: 'auto',
+        safetyLevel: 'default',
+        networkSearch: true,
+      },
+    }
+    const geminiPricing: PricingBreakdown = {
+      mode: 'tiered',
+      mediaResolution: 'medium',
+      basePoints: 35000,
+      referenceImageCount: 0,
+      referenceImagePoints: 0,
+      searchGroundingEnabled: true,
+      searchGroundingEstimatedCount: 5,
+      searchGroundingPointsPerCount: 1200,
+      searchGroundingEstimatedPoints: 6000,
+      maskEditApplied: false,
+      maskEditPoints: 0,
+      minimumPoints: 10000,
+      pointsPerImage: 41000,
+      imageCount: 2,
+      totalPoints: 82000,
+    }
+    pointMocks.reserveGenerationPoints.mockResolvedValueOnce({
+      balance: 100000,
+      lastDailyRefillDate: '2026-05-26',
+      dailyRefilled: false,
+      reservedPoints: 82000,
+    })
+    pointMocks.settleGenerationPoints.mockResolvedValueOnce({
+      balance: 108400,
+      chargedPoints: 73600,
+      refundedPoints: 8400,
+    })
+    apiMocks.callServerImageApi
+      .mockResolvedValueOnce({ images: ['data:image/png;base64,a'], searchGroundingCount: 1 })
+      .mockResolvedValueOnce({ images: ['data:image/png;base64,b'], searchGroundingCount: 2 })
+
+    const status = await createImageGenerationJob({
+      user,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 2, userConcurrentImageLimit: 3, models: [{ ...geminiApiConfig, enabled: true }] }),
+      apiConfig: geminiApiConfig,
+      prompt: 'prompt',
+      params: geminiParams,
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: geminiPricing,
+    })
+    await flushPromises()
+
+    expect(pointMocks.settleGenerationPoints).toHaveBeenCalledWith(expect.objectContaining({
+      reservedPoints: 82000,
+      actualImages: 2,
+      actualPoints: 73600,
+      capOverageToReserved: true,
+    }))
+    expect(serializeImageGenerationJob(getImageGenerationJob(status.jobId)!)).toMatchObject({
+      status: 'done',
+      estimatedPoints: 82000,
+      chargedPoints: 73600,
+      refundedPoints: 8400,
+      pricingBreakdown: expect.objectContaining({
+        searchGroundingActualCount: 3,
+        searchGroundingActualPoints: 3600,
+        totalPoints: 73600,
       }),
     })
   })

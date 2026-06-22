@@ -1,6 +1,6 @@
 import type { AdminModelConfig, ApiMode, ApiProvider, PublicGenerationModel } from '../../src/types'
 import { createError } from 'h3'
-import { DEFAULT_GEMINI_TIERED_PRICING_RULES, normalizePricingMode, normalizeTieredPricingRules } from '../../src/lib/pricing'
+import { DEFAULT_GEMINI_TIERED_PRICING_RULES, normalizePricingMode, normalizePricingRulesForProvider } from '../../src/lib/pricing'
 import { DEFAULT_GEMINI_BASE_URL, DEFAULT_GEMINI_MODEL, normalizeGeminiAdminDefaults } from '../../src/lib/gemini'
 import { getDb } from './db'
 
@@ -105,10 +105,7 @@ function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: 
     codexCompatible: provider === 'openai' ? Boolean(defaults.codexCompatible) : false,
     geminiDefaults: provider === 'google-gemini' ? normalizeGeminiAdminDefaults(defaults.geminiDefaults) : undefined,
     pricingMode: provider === 'google-gemini' && defaults.pricingMode === undefined ? 'tiered' : normalizePricingMode(defaults.pricingMode),
-    pricingRules: normalizeTieredPricingRules(
-      pricingRules,
-      provider === 'google-gemini' ? DEFAULT_GEMINI_TIERED_PRICING_RULES : undefined,
-    ),
+    pricingRules: normalizePricingRulesForProvider(pricingRules, provider),
   }
 }
 

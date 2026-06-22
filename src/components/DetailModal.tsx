@@ -575,14 +575,25 @@ export default function DetailModal() {
                       <span>单图：{formatPoints(pricingBreakdown.pointsPerImage)}</span>
                       <span>数量：{pricingBreakdown.imageCount}</span>
                       {pricingBreakdown.mode === 'tiered' && (
-                        <>
-                          <span>尺寸档：{pricingBreakdown.sizeTier ?? '-'}</span>
-                          <span>质量：{pricingBreakdown.quality ?? '-'}</span>
-                          <span>基础：{formatPoints(pricingBreakdown.basePoints)}</span>
-                          <span>参考图：{pricingBreakdown.referenceImageCount} 张 / {formatPoints(pricingBreakdown.referenceImagePoints)}</span>
-                          <span>遮罩：{pricingBreakdown.maskEditApplied ? formatPoints(pricingBreakdown.maskEditPoints) : '无'}</span>
-                          <span>最低：{formatPoints(pricingBreakdown.minimumPoints)}</span>
-                        </>
+                        taskProvider === 'google-gemini' ? (
+                          <>
+                            <span>媒体精度：{pricingBreakdown.mediaResolution ?? task.params.gemini?.mediaResolution ?? '-'}</span>
+                            <span>基础：{formatPoints(pricingBreakdown.basePoints)}</span>
+                            <span>参考图：{pricingBreakdown.referenceImageCount} 张 / {formatPoints(pricingBreakdown.referenceImagePoints)}</span>
+                            <span>搜索预估：{pricingBreakdown.searchGroundingEnabled ? `${pricingBreakdown.searchGroundingEstimatedCount ?? 0} 次 / ${formatPoints(pricingBreakdown.searchGroundingEstimatedPoints)}` : '关闭'}</span>
+                            <span>搜索实际：{pricingBreakdown.searchGroundingEnabled ? `${pricingBreakdown.searchGroundingActualCount ?? '-'} 次 / ${formatPoints(pricingBreakdown.searchGroundingActualPoints)}` : '关闭'}</span>
+                            <span>最低：{formatPoints(pricingBreakdown.minimumPoints)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>尺寸档：{pricingBreakdown.sizeTier ?? '-'}</span>
+                            <span>质量：{pricingBreakdown.quality ?? '-'}</span>
+                            <span>基础：{formatPoints(pricingBreakdown.basePoints)}</span>
+                            <span>参考图：{pricingBreakdown.referenceImageCount} 张 / {formatPoints(pricingBreakdown.referenceImagePoints)}</span>
+                            <span>遮罩：{pricingBreakdown.maskEditApplied ? formatPoints(pricingBreakdown.maskEditPoints) : '无'}</span>
+                            <span>最低：{formatPoints(pricingBreakdown.minimumPoints)}</span>
+                          </>
+                        )
                       )}
                     </>
                   )}
@@ -614,6 +625,11 @@ export default function DetailModal() {
                     <span className="text-gray-400 dark:text-gray-500">安全</span>
                     <br />
                     <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.safetyLevel ?? 'default'}</span>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="text-gray-400 dark:text-gray-500">网络搜索</span>
+                    <br />
+                    <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.networkSearch ? '开启' : '关闭'}</span>
                   </div>
                   <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
                     <span className="text-gray-400 dark:text-gray-500">数量</span>

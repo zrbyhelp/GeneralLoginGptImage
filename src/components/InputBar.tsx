@@ -1217,6 +1217,20 @@ export default function InputBar() {
           className={selectClass}
         />
       </label>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="text-gray-400 dark:text-gray-500 ml-1">网络搜索</span>
+        <button
+          type="button"
+          onClick={() => setParams({ gemini: { ...geminiParams, networkSearch: !geminiParams.networkSearch } })}
+          className={`flex h-[30px] items-center justify-between rounded-xl border px-3 text-xs shadow-sm transition ${geminiParams.networkSearch ? 'border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300' : 'border-gray-200/60 bg-white/50 text-gray-500 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400'}`}
+          aria-pressed={geminiParams.networkSearch}
+        >
+          <span>{geminiParams.networkSearch ? '开启' : '关闭'}</span>
+          <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${geminiParams.networkSearch ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${geminiParams.networkSearch ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+          </span>
+        </button>
+      </label>
       {renderNumberParam()}
     </div>
   )

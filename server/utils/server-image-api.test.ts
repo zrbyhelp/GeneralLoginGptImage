@@ -60,6 +60,7 @@ const params = {
     temperature: 0.8,
     thinkingMode: 'low' as const,
     safetyLevel: 'balanced' as const,
+    networkSearch: false,
   },
 }
 
@@ -327,6 +328,41 @@ describe('server image API Gemini generateContent mode', () => {
       { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
       { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
     ])
+    expect(body).not.toHaveProperty('tools')
+  })
+
+  it('enables Gemini Google Search grounding and returns actual query count', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      candidates: [
+        {
+          groundingMetadata: {
+            webSearchQueries: ['query a', 'query b', 'query a'],
+          },
+          content: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: 'gemini-image',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }), { status: 200 }))
+
+    const result = await callServerImageApi({
+      config: geminiConfig,
+      prompt: 'prompt',
+      params: { ...params, n: 1, gemini: { ...params.gemini, networkSearch: true } },
+      inputImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.tools).toEqual([{ google_search: {} }])
+    expect(result.searchGroundingCount).toBe(2)
   })
 
   it('parses snake_case inline image responses', async () => {

@@ -76,6 +76,7 @@ describe('parameter compatibility', () => {
         temperature: 0.65,
         thinkingMode: 'low',
         safetyLevel: 'balanced',
+        networkSearch: true,
       },
     }, geminiModel)
 
@@ -87,6 +88,7 @@ describe('parameter compatibility', () => {
         temperature: 0.65,
         thinkingMode: 'low',
         safetyLevel: 'balanced',
+        networkSearch: true,
       },
     })
   })

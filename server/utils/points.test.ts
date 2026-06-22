@@ -57,6 +57,31 @@ describe('points utilities', () => {
     expect(settlement.balance).toBe(99)
   })
 
+  it('caps generation overage to reserved points when requested', async () => {
+    const reservation = await reserveGenerationPoints({
+      userId: 'user-overage',
+      requestedImages: 1,
+      costPerImage: 90,
+      dailyTarget: 100,
+      referenceId: 'job-overage',
+    })
+    const settlement = await settleGenerationPoints({
+      userId: 'user-overage',
+      reservedPoints: reservation.reservedPoints,
+      actualImages: 1,
+      costPerImage: 90,
+      actualPoints: 150,
+      capOverageToReserved: true,
+      referenceId: 'job-overage',
+    })
+
+    expect(reservation.reservedPoints).toBe(90)
+    expect(reservation.balance).toBe(10)
+    expect(settlement.chargedPoints).toBe(90)
+    expect(settlement.refundedPoints).toBe(0)
+    expect(settlement.balance).toBe(10)
+  })
+
   it('creates one-time redeem codes that add points to the account', async () => {
     const codes = await createRedeemCodes({
       createdByUserId: 'admin-a',

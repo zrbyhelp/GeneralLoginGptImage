@@ -1,5 +1,6 @@
 import { createError } from 'h3'
 import type { PricingBreakdown, TaskParams } from '../../src/types'
+import { calculateActualGenerationPricing } from '../../src/lib/pricing'
 import type { AppUser } from './auth'
 import { generateId } from './crypto'
 import type { AdminSettings, ServerApiConfig } from './admin-settings'
@@ -182,13 +183,29 @@ function mergeActualParams(...sources: Array<Partial<TaskParams> | undefined>) {
   return Object.keys(merged).length ? merged as Partial<TaskParams> : undefined
 }
 
-async function settleJobPoints(job: ImageGenerationJob, actualImages: number) {
+function getJobActualPricing(job: ImageGenerationJob, actualImages: number, actualSearchGroundingCount = 0) {
+  return calculateActualGenerationPricing({
+    model: job.apiConfig,
+    standardPointCost: job.settings.standardPointCost,
+    params: job.params,
+    imageCount: actualImages,
+    inputImageCount: job.inputImageDataUrls.length,
+    hasMask: Boolean(job.maskDataUrl),
+    successfulImageCount: actualImages,
+    actualSearchGroundingCount,
+  })
+}
+
+async function settleJobPoints(job: ImageGenerationJob, actualImages: number, actualPricing?: PricingBreakdown) {
+  const useActualPoints = Boolean(actualPricing?.searchGroundingEnabled)
   try {
     return await settleGenerationPoints({
       userId: job.user.id,
       reservedPoints: job.reservedPoints,
       actualImages,
       costPerImage: job.costPerImage,
+      actualPoints: useActualPoints ? actualPricing?.totalPoints : undefined,
+      capOverageToReserved: useActualPoints,
       referenceId: job.id,
     })
   } catch {
@@ -218,7 +235,9 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
 
   job.finishedAt = Date.now()
   if (!successful.length) {
-    const settlement = await settleJobPoints(job, 0)
+    const actualPricing = getJobActualPricing(job, 0)
+    const settlement = await settleJobPoints(job, 0, actualPricing)
+    const resultPricing = actualPricing.searchGroundingEnabled ? actualPricing : job.pricing
     job.status = 'error'
     job.error = errors[0] || '生成失败'
     job.result = {
@@ -239,7 +258,7 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
       refundedPoints: settlement.refundedPoints,
       billingMode: job.pricing.mode,
       estimatedPoints: job.pricing.totalPoints,
-      pricingBreakdown: job.pricing,
+      pricingBreakdown: resultPricing,
       galleryUploadError: null,
     }
     scheduleCleanup(job)
@@ -247,6 +266,12 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
   }
 
   const images = successful.flatMap((unit) => unit.result?.images ?? [])
+  const actualSearchGroundingCount = successful.reduce(
+    (sum, unit) => sum + Math.max(0, Math.floor(Number(unit.result?.searchGroundingCount) || 0)),
+    0,
+  )
+  const actualPricing = getJobActualPricing(job, images.length, actualSearchGroundingCount)
+  const resultPricing = actualPricing.searchGroundingEnabled ? actualPricing : job.pricing
   const actualParamsList = successful.flatMap((unit) =>
     unit.result?.actualParamsList ?? (unit.result?.images ?? []).map(() => unit.result?.actualParams),
   )
@@ -267,7 +292,7 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
     })
   }
 
-  const settlement = await settleJobPoints(job, images.length)
+  const settlement = await settleJobPoints(job, images.length, actualPricing)
   pointsBalance = settlement.balance
   chargedPoints = settlement.chargedPoints
   refundedPoints = settlement.refundedPoints
@@ -311,7 +336,7 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
     refundedPoints,
     billingMode: job.pricing.mode,
     estimatedPoints: job.pricing.totalPoints,
-    pricingBreakdown: job.pricing,
+    pricingBreakdown: resultPricing,
     galleryUploadError,
   }
   scheduleCleanup(job)

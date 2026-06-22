@@ -186,4 +186,36 @@ describe('admin settings models', () => {
     expect(publicModel).not.toHaveProperty('baseUrl')
     expect(publicModel).not.toHaveProperty('geminiDefaults')
   })
+
+  it('resets legacy Gemini size-quality pricing rules to the media-resolution template', async () => {
+    const defaults = getDefaultAdminSettings()
+    const legacyGeminiRules = {
+      sizeQualityPoints: {
+        '1K': { auto: 1, low: 1, medium: 1, high: 1 },
+        '2K': { auto: 2, low: 2, medium: 2, high: 2 },
+        '4K': { auto: 3, low: 3, medium: 3, high: 3 },
+      },
+      referenceImagePoints: 999999,
+      maskEditPoints: 999999,
+      minimumPoints: 999999,
+    }
+    const model = {
+      ...defaults.models[0],
+      id: 'legacy-gemini',
+      provider: 'google-gemini' as const,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKey: 'gemini-key',
+      model: 'gemini-3.1-flash-image',
+      apiMode: 'generateContent' as const,
+      pricingMode: 'tiered' as const,
+      pricingRules: legacyGeminiRules,
+    }
+
+    await updateAdminSettings({ models: [model], defaultModelId: model.id })
+
+    const settings = await getAdminSettings()
+    expect(settings.models[0].pricingRules).toEqual(DEFAULT_GEMINI_TIERED_PRICING_RULES)
+    expect(settings.models[0].pricingRules).not.toHaveProperty('sizeQualityPoints')
+    expect(getPublicGenerationModels(settings)[0].pricingPreviewRules).toEqual(DEFAULT_GEMINI_TIERED_PRICING_RULES)
+  })
 })
