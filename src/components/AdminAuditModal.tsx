@@ -3,7 +3,7 @@ import type { AdminModelConfig, ApiMode, ApiProvider, GeminiAdminDefaults, Gemin
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { DEFAULT_GEMINI_TIERED_PRICING_RULES, DEFAULT_OPENAI_TIERED_PRICING_RULES, normalizeGeminiPricingRules, normalizeTieredPricingRules } from '../lib/pricing'
-import { DEFAULT_GEMINI_ADMIN_DEFAULTS, DEFAULT_GEMINI_BASE_URL, DEFAULT_GEMINI_MODEL, normalizeGeminiAdminDefaults } from '../lib/gemini'
+import { DEFAULT_GEMINI_ADMIN_DEFAULTS, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_SDK_BASE_URL, DEFAULT_GEMINI_VERTEX_BASE_URL, DEFAULT_GEMINI_VERTEX_MODEL, normalizeGeminiAdminDefaults } from '../lib/gemini'
 
 type AdminSettings = {
   models: AdminModelConfig[]
@@ -64,17 +64,24 @@ function patchModel(models: AdminModelConfig[], id: string, patch: Partial<Admin
     const provider = patch.provider ?? model.provider
     const switchedProvider = patch.provider && patch.provider !== model.provider
     const isGemini = provider === 'google-gemini'
+    const previousGeminiMode = model.apiMode === 'geminiVertex' ? 'geminiVertex' : 'geminiDeveloper'
+    const nextGeminiMode = patch.apiMode === 'geminiVertex' ? 'geminiVertex' : 'geminiDeveloper'
+    const switchedGeminiMode = isGemini && patch.apiMode && nextGeminiMode !== previousGeminiMode
     return {
       ...model,
       ...patch,
-      apiMode: provider === 'fal' ? 'images' : isGemini ? 'generateContent' : patch.apiMode ?? model.apiMode,
+      apiMode: provider === 'fal' ? 'images' : isGemini ? nextGeminiMode : patch.apiMode ?? model.apiMode,
       codexCompatible: provider === 'openai' ? patch.codexCompatible ?? model.codexCompatible : false,
       baseUrl: switchedProvider
         ? provider === 'fal'
           ? 'https://fal.run'
           : isGemini
-            ? DEFAULT_GEMINI_BASE_URL
+            ? DEFAULT_GEMINI_SDK_BASE_URL
             : 'https://api.openai.com/v1'
+        : switchedGeminiMode
+          ? nextGeminiMode === 'geminiVertex'
+            ? DEFAULT_GEMINI_VERTEX_BASE_URL
+            : DEFAULT_GEMINI_SDK_BASE_URL
         : patch.baseUrl ?? model.baseUrl,
       model: switchedProvider
         ? provider === 'fal'
@@ -82,6 +89,10 @@ function patchModel(models: AdminModelConfig[], id: string, patch: Partial<Admin
           : isGemini
             ? DEFAULT_GEMINI_MODEL
             : 'gpt-image-2'
+        : switchedGeminiMode
+          ? nextGeminiMode === 'geminiVertex'
+            ? DEFAULT_GEMINI_VERTEX_MODEL
+            : DEFAULT_GEMINI_MODEL
         : patch.model ?? model.model,
       geminiDefaults: isGemini
         ? normalizeGeminiAdminDefaults(patch.geminiDefaults ?? model.geminiDefaults ?? DEFAULT_GEMINI_ADMIN_DEFAULTS)
@@ -461,9 +472,17 @@ export default function AdminAuditModal() {
                       </label>
                     )}
                     {model.provider === 'google-gemini' && (
-                      <div className="rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
+                      <label className="block">
                         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">调用方式</span>
-                        generateContent
+                        <select value={model.apiMode === 'geminiVertex' ? 'geminiVertex' : 'geminiDeveloper'} onChange={(event) => updateModel(model.id, { apiMode: event.target.value as ApiMode })} className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100">
+                          <option value="geminiDeveloper">Gemini Developer API</option>
+                          <option value="geminiVertex">Gemini Vertex SDK</option>
+                        </select>
+                      </label>
+                    )}
+                    {model.provider === 'google-gemini' && model.apiMode === 'geminiVertex' && (
+                      <div className="rounded-xl border border-blue-200/70 bg-blue-50/70 px-3 py-2 text-xs text-blue-700 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-200">
+                        ZenMux 示例：API URL 使用 https://zenmux.ai/api/vertex-ai，模型 ID 使用 google/gemini-3-pro-image。
                       </div>
                     )}
                     <label className="block">

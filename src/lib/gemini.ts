@@ -1,7 +1,10 @@
 import type { GeminiAdminDefaults } from '../types'
 
 export const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
+export const DEFAULT_GEMINI_SDK_BASE_URL = 'https://generativelanguage.googleapis.com'
+export const DEFAULT_GEMINI_VERTEX_BASE_URL = 'https://zenmux.ai/api/vertex-ai'
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-image'
+export const DEFAULT_GEMINI_VERTEX_MODEL = 'google/gemini-3-pro-image'
 
 export const DEFAULT_GEMINI_ADMIN_DEFAULTS: GeminiAdminDefaults = {
   topP: null,

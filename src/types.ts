@@ -1,6 +1,6 @@
 // ===== 设置 =====
 
-export type ApiMode = 'images' | 'responses' | 'generateContent'
+export type ApiMode = 'images' | 'responses' | 'generateContent' | 'geminiDeveloper' | 'geminiVertex'
 export type ApiProvider = 'openai' | 'fal' | 'google-gemini'
 export type PricingMode = 'flat' | 'tiered'
 export type SizePriceTier = '1K' | '2K' | '4K'

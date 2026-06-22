@@ -1,4 +1,5 @@
 import { fal } from '@fal-ai/client'
+import { GoogleGenAI, Modality, type Content, type GenerateContentConfig, type GoogleGenAIOptions } from '@google/genai'
 import type {
   FalApiResponse,
   GeminiAdminDefaults,
@@ -29,6 +30,11 @@ const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prom
 
 function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, '')
+}
+
+function normalizeGeminiSdkBaseUrl(baseUrl: string) {
+  const normalized = normalizeBaseUrl(baseUrl)
+  return normalized.replace(/\/v1(?:beta)?$/i, '')
 }
 
 function buildApiUrl(baseUrl: string, path: string) {
@@ -100,6 +106,18 @@ async function getApiErrorMessage(response: Response) {
     message = text
   }
   return message
+}
+
+function createReadableErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!/<html[\s>]/i.test(message) && !/<!doctype html/i.test(message)) return message
+  const withoutTags = message
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return withoutTags ? withoutTags.slice(0, 500) : '上游返回 HTML 错误页面'
 }
 
 function pickActualParams(source: unknown): Partial<TaskParams> {
@@ -234,12 +252,6 @@ export async function callServerImageApi(opts: {
     : callImagesApi(opts)
 }
 
-function buildGeminiApiUrl(baseUrl: string, model: string) {
-  const normalizedModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '') || 'gemini-3.1-flash-image'
-  const modelPath = normalizedModel.startsWith('models/') ? normalizedModel : `models/${normalizedModel}`
-  return `${normalizeBaseUrl(baseUrl)}/${modelPath}:generateContent`
-}
-
 function mapGeminiMediaResolution(value: GeminiUserParams['mediaResolution'] | undefined) {
   if (value === 'low') return 'MEDIA_RESOLUTION_LOW'
   if (value === 'medium') return 'MEDIA_RESOLUTION_MEDIUM'
@@ -282,12 +294,12 @@ function compactRecord(record: Record<string, unknown>) {
   )
 }
 
-function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdminDefaults) {
+function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdminDefaults): GenerateContentConfig {
   const gemini = params.gemini
   const mediaResolution = mapGeminiMediaResolution(gemini?.mediaResolution)
   const generationConfig: Record<string, unknown> = {
     ...(defaults?.generationConfig ?? {}),
-    responseModalities: ['Image'],
+    responseModalities: [Modality.TEXT, Modality.IMAGE],
     candidateCount: 1,
     mediaResolution,
   }
@@ -304,7 +316,7 @@ function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdmin
   const thinkingConfig = userThinkingConfig ?? defaults?.thinkingConfig
   if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig
 
-  return compactRecord(generationConfig)
+  return compactRecord(generationConfig) as GenerateContentConfig
 }
 
 function createGeminiSafetySettings(params: TaskParams, defaults?: GeminiAdminDefaults) {
@@ -386,38 +398,38 @@ async function callGeminiGenerateContentApi(opts: {
     return mergeConcurrentResults(results)
   }
 
-  const parts: Array<Record<string, unknown>> = [
+  const parts: Content['parts'] = [
     { text: opts.prompt },
     ...opts.inputImageDataUrls.map((dataUrl) => ({
       inlineData: dataUrlToInlineData(dataUrl),
     })),
   ]
   const safetySettings = createGeminiSafetySettings(opts.params, opts.config.geminiDefaults)
-  const body = compactRecord({
-    contents: [{ role: 'user', parts }],
-    generationConfig: createGeminiGenerationConfig(opts.params, opts.config.geminiDefaults),
+  const config = compactRecord({
+    ...createGeminiGenerationConfig(opts.params, opts.config.geminiDefaults),
     safetySettings,
-    tools: opts.params.gemini?.networkSearch ? [{ google_search: {} }] : undefined,
-  })
+    tools: opts.params.gemini?.networkSearch ? [{ googleSearch: {} }] : undefined,
+  }) as GenerateContentConfig
+  const clientOptions: GoogleGenAIOptions = {
+    apiKey: opts.config.apiKey,
+    vertexai: opts.config.apiMode === 'geminiVertex' ? true : undefined,
+    httpOptions: {
+      baseUrl: normalizeGeminiSdkBaseUrl(opts.config.baseUrl),
+      apiVersion: opts.config.apiMode === 'geminiVertex' ? 'v1' : 'v1beta',
+      timeout: opts.config.timeout * 1000,
+    },
+  }
 
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), opts.config.timeout * 1000)
   try {
-    const response = await fetch(buildGeminiApiUrl(opts.config.baseUrl, opts.config.model), {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': opts.config.apiKey,
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, max-age=0',
-        Pragma: 'no-cache',
+    const client = new GoogleGenAI(clientOptions)
+    const payload = await client.models.generateContent({
+      model: opts.config.model,
+      contents: {
+        role: 'user',
+        parts,
       },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-      cache: 'no-store',
+      config,
     })
-
-    if (!response.ok) throw new Error(await getApiErrorMessage(response))
-    const payload = await response.json()
     const images = parseGeminiImageResults(payload)
     const searchGroundingCount = opts.params.gemini?.networkSearch
       ? parseGeminiSearchGroundingCount(payload)
@@ -430,8 +442,8 @@ async function callGeminiGenerateContentApi(opts: {
       revisedPrompts: images.map(() => undefined),
       searchGroundingCount,
     }
-  } finally {
-    clearTimeout(timeoutId)
+  } catch (error) {
+    throw new Error(createReadableErrorMessage(error))
   }
 }
 

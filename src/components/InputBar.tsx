@@ -1157,9 +1157,9 @@ export default function InputBar() {
   )
 
   const renderGeminiParams = (cols: string) => (
-    <div className={`grid ${cols} gap-2 text-xs flex-1`}>
+    <div className={`grid ${cols} min-w-0 gap-2 text-xs flex-1`}>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">媒体精度</span>
+        <span className="text-gray-400 dark:text-gray-500 ml-1 whitespace-nowrap">媒体精度</span>
         <Select
           value={geminiParams.mediaResolution}
           onChange={(val) => setParams({ gemini: { ...geminiParams, mediaResolution: val as any } })}
@@ -1173,7 +1173,7 @@ export default function InputBar() {
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">创造性</span>
+        <span className="text-gray-400 dark:text-gray-500 ml-1 whitespace-nowrap">创造性</span>
         <input
           value={geminiParams.temperature == null ? '' : geminiParams.temperature}
           onChange={(event) => {
@@ -1190,7 +1190,7 @@ export default function InputBar() {
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">思考</span>
+        <span className="text-gray-400 dark:text-gray-500 ml-1 whitespace-nowrap">思考</span>
         <Select
           value={geminiParams.thinkingMode}
           onChange={(val) => setParams({ gemini: { ...geminiParams, thinkingMode: val as any } })}
@@ -1204,7 +1204,7 @@ export default function InputBar() {
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">安全</span>
+        <span className="text-gray-400 dark:text-gray-500 ml-1 whitespace-nowrap">安全</span>
         <Select
           value={geminiParams.safetyLevel}
           onChange={(val) => setParams({ gemini: { ...geminiParams, safetyLevel: val as any } })}
@@ -1218,7 +1218,7 @@ export default function InputBar() {
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">网络搜索</span>
+        <span className="text-gray-400 dark:text-gray-500 ml-1 whitespace-nowrap">网络搜索</span>
         <button
           type="button"
           onClick={() => setParams({ gemini: { ...geminiParams, networkSearch: !geminiParams.networkSearch } })}
@@ -1425,7 +1425,7 @@ export default function InputBar() {
           <div className="mt-3">
             {/* 桌面端布局 */}
             <div className="hidden sm:flex items-end justify-between gap-3">
-              {isGeminiProvider ? renderGeminiParams('grid-cols-5') : renderParams('grid-cols-6')}
+              {isGeminiProvider ? renderGeminiParams('grid-cols-6') : renderParams('grid-cols-6')}
 
               <div className="flex gap-2 flex-shrink-0 mb-0.5">
                 <div

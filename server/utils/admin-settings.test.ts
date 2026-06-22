@@ -129,7 +129,7 @@ describe('admin settings models', () => {
     expect(getPublicGenerationModels(settings)[0]).not.toHaveProperty('pricingRules')
   })
 
-  it('persists Gemini models with generateContent mode and hidden admin defaults', async () => {
+  it('persists Gemini models with SDK modes and hidden admin defaults', async () => {
     const defaults = getDefaultAdminSettings()
     const model = {
       ...defaults.models[0],
@@ -162,7 +162,7 @@ describe('admin settings models', () => {
     expect(settings.models[0]).toMatchObject({
       id: 'gemini',
       provider: 'google-gemini',
-      apiMode: 'generateContent',
+      apiMode: 'geminiDeveloper',
       codexCompatible: false,
       pricingMode: 'tiered',
       pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
@@ -179,12 +179,42 @@ describe('admin settings models', () => {
     expect(publicModel).toMatchObject({
       id: 'gemini',
       provider: 'google-gemini',
-      apiMode: 'generateContent',
+      apiMode: 'geminiDeveloper',
       pricingPreviewRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
     })
     expect(publicModel).not.toHaveProperty('apiKey')
     expect(publicModel).not.toHaveProperty('baseUrl')
     expect(publicModel).not.toHaveProperty('geminiDefaults')
+  })
+
+  it('persists Gemini Vertex SDK models', async () => {
+    const defaults = getDefaultAdminSettings()
+    const model = {
+      ...defaults.models[0],
+      id: 'gemini-vertex',
+      provider: 'google-gemini' as const,
+      baseUrl: 'https://zenmux.ai/api/vertex-ai',
+      apiKey: 'gemini-key',
+      model: 'google/gemini-3-pro-image',
+      apiMode: 'geminiVertex' as const,
+      pricingMode: 'tiered' as const,
+      pricingRules: DEFAULT_GEMINI_TIERED_PRICING_RULES,
+    }
+
+    await updateAdminSettings({ models: [model], defaultModelId: model.id })
+
+    const settings = await getAdminSettings()
+    expect(settings.models[0]).toMatchObject({
+      id: 'gemini-vertex',
+      provider: 'google-gemini',
+      baseUrl: 'https://zenmux.ai/api/vertex-ai',
+      model: 'google/gemini-3-pro-image',
+      apiMode: 'geminiVertex',
+    })
+    expect(getPublicGenerationModels(settings)[0]).toMatchObject({
+      id: 'gemini-vertex',
+      apiMode: 'geminiVertex',
+    })
   })
 
   it('resets legacy Gemini size-quality pricing rules to the media-resolution template', async () => {

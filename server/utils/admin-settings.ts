@@ -1,7 +1,7 @@
 import type { AdminModelConfig, ApiMode, ApiProvider, PublicGenerationModel } from '../../src/types'
 import { createError } from 'h3'
 import { DEFAULT_GEMINI_TIERED_PRICING_RULES, normalizePricingMode, normalizePricingRulesForProvider } from '../../src/lib/pricing'
-import { DEFAULT_GEMINI_BASE_URL, DEFAULT_GEMINI_MODEL, normalizeGeminiAdminDefaults } from '../../src/lib/gemini'
+import { DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_SDK_BASE_URL, DEFAULT_GEMINI_VERTEX_BASE_URL, DEFAULT_GEMINI_VERTEX_MODEL, normalizeGeminiAdminDefaults } from '../../src/lib/gemini'
 import { getDb } from './db'
 
 export type ServerApiConfig = Omit<AdminModelConfig, 'enabled'>
@@ -60,7 +60,8 @@ function parseProvider(value: unknown): ApiProvider {
 }
 
 function parseApiMode(value: unknown): ApiMode {
-  if (value === 'generateContent') return 'generateContent'
+  if (value === 'generateContent' || value === 'geminiDeveloper') return 'geminiDeveloper'
+  if (value === 'geminiVertex') return 'geminiVertex'
   return value === 'responses' ? 'responses' : 'images'
 }
 
@@ -81,15 +82,17 @@ function createModelId(prefix = 'model') {
 
 function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: ApiProvider }): ServerApiConfig {
   const provider = parseProvider(defaults.provider)
+  const parsedApiMode = parseApiMode(defaults.apiMode)
+  const geminiApiMode = parsedApiMode === 'geminiVertex' ? 'geminiVertex' : 'geminiDeveloper'
   const fallbackModel = provider === 'fal'
     ? 'openai/gpt-image-2'
     : provider === 'google-gemini'
-      ? DEFAULT_GEMINI_MODEL
+      ? geminiApiMode === 'geminiVertex' ? DEFAULT_GEMINI_VERTEX_MODEL : DEFAULT_GEMINI_MODEL
       : 'gpt-image-2'
   const fallbackBaseUrl = provider === 'fal'
     ? 'https://fal.run'
     : provider === 'google-gemini'
-      ? DEFAULT_GEMINI_BASE_URL
+      ? geminiApiMode === 'geminiVertex' ? DEFAULT_GEMINI_VERTEX_BASE_URL : DEFAULT_GEMINI_SDK_BASE_URL
       : 'https://api.openai.com/v1'
   const pricingRules = defaults.pricingRules ??
     (provider === 'google-gemini' ? DEFAULT_GEMINI_TIERED_PRICING_RULES : undefined)
@@ -101,7 +104,7 @@ function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: 
     apiKey: String(defaults.apiKey || ''),
     model: String(defaults.model || fallbackModel).trim() || fallbackModel,
     timeout: parsePositiveInt(defaults.timeout, 600, 10, 3600),
-    apiMode: provider === 'fal' ? 'images' : provider === 'google-gemini' ? 'generateContent' : parseApiMode(defaults.apiMode),
+    apiMode: provider === 'fal' ? 'images' : provider === 'google-gemini' ? geminiApiMode : parsedApiMode,
     codexCompatible: provider === 'openai' ? Boolean(defaults.codexCompatible) : false,
     geminiDefaults: provider === 'google-gemini' ? normalizeGeminiAdminDefaults(defaults.geminiDefaults) : undefined,
     pricingMode: provider === 'google-gemini' && defaults.pricingMode === undefined ? 'tiered' : normalizePricingMode(defaults.pricingMode),
@@ -123,9 +126,9 @@ function legacyApiConfigFromRuntime() {
     id: 'default-model',
     name: '默认模型',
     provider,
-    baseUrl: String(config.apiBaseUrl || (provider === 'fal' ? 'https://fal.run' : 'https://api.openai.com/v1')),
+    baseUrl: String(config.apiBaseUrl || (provider === 'fal' ? 'https://fal.run' : provider === 'google-gemini' ? DEFAULT_GEMINI_SDK_BASE_URL : 'https://api.openai.com/v1')),
     apiKey: String(config.apiKey || ''),
-    model: String(config.apiModel || (provider === 'fal' ? 'openai/gpt-image-2' : 'gpt-image-2')),
+    model: String(config.apiModel || (provider === 'fal' ? 'openai/gpt-image-2' : provider === 'google-gemini' ? DEFAULT_GEMINI_MODEL : 'gpt-image-2')),
     timeout: parsePositiveInt(config.apiTimeout, 600, 10, 3600),
     apiMode: parseApiMode(config.apiMode),
     codexCompatible: parseBoolean(config.apiCodexCli),
