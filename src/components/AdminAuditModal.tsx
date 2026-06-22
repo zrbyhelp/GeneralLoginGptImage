@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { AdminModelConfig, ApiMode, ApiProvider } from '../types'
+import type { AdminModelConfig, ApiMode, ApiProvider, SizePriceTier, TaskParams, TieredPricingRules } from '../types'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES, normalizeTieredPricingRules } from '../lib/pricing'
 
 type AdminSettings = {
   models: AdminModelConfig[]
@@ -29,6 +30,8 @@ const DEFAULT_MODEL: AdminModelConfig = {
   apiMode: 'images',
   codexCompatible: false,
   enabled: true,
+  pricingMode: 'flat',
+  pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
 }
 
 const DEFAULT_SETTINGS: AdminSettings = {
@@ -67,6 +70,20 @@ function patchModel(models: AdminModelConfig[], id: string, patch: Partial<Admin
       model: patch.provider === 'fal' && !model.model.trim() ? 'openai/gpt-image-2' : patch.model ?? model.model,
     }
   })
+}
+
+const PRICE_TIERS: SizePriceTier[] = ['1K', '2K', '4K']
+const PRICE_QUALITIES: Array<TaskParams['quality']> = ['auto', 'low', 'medium', 'high']
+
+function patchPricingRules(
+  rules: TieredPricingRules,
+  updater: (rules: TieredPricingRules) => TieredPricingRules,
+) {
+  return updater(normalizeTieredPricingRules(rules))
+}
+
+function pricingNumber(value: string) {
+  return Math.max(0, Math.floor(Number(value) || 0))
 }
 
 export default function AdminAuditModal() {
@@ -173,6 +190,39 @@ export default function AdminAuditModal() {
     })
   }
 
+  function updateModelPricingRule(id: string, patcher: (rules: TieredPricingRules) => TieredPricingRules) {
+    setSettings((prev) => ({
+      ...prev,
+      models: prev.models.map((model) =>
+        model.id === id
+          ? { ...model, pricingRules: patchPricingRules(model.pricingRules, patcher) }
+          : model,
+      ),
+    }))
+  }
+
+  function updateTierPrice(id: string, tier: SizePriceTier, quality: TaskParams['quality'], value: string) {
+    updateModelPricingRule(id, (rules) => ({
+      ...rules,
+      sizeQualityPoints: {
+        ...rules.sizeQualityPoints,
+        [tier]: {
+          ...rules.sizeQualityPoints[tier],
+          [quality]: Math.max(1, pricingNumber(value)),
+        },
+      },
+    }))
+  }
+
+  function updatePricingNumber(id: string, key: keyof Pick<TieredPricingRules, 'referenceImagePoints' | 'maskEditPoints' | 'minimumPoints'>, value: string) {
+    updateModelPricingRule(id, (rules) => ({
+      ...rules,
+      [key]: key === 'minimumPoints'
+        ? Math.max(1, pricingNumber(value))
+        : pricingNumber(value),
+    }))
+  }
+
   function addModel() {
     const model = createModel()
     setSettings((prev) => ({
@@ -255,7 +305,9 @@ export default function AdminAuditModal() {
               </button>
             </div>
             <div className="space-y-4">
-              {settings.models.map((model, index) => (
+              {settings.models.map((model, index) => {
+                const pricingRules = normalizeTieredPricingRules(model.pricingRules)
+                return (
                 <div key={model.id} className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
@@ -321,8 +373,94 @@ export default function AdminAuditModal() {
                       </div>
                     )}
                   </div>
+                  <div className="mt-4 border-t border-gray-200/70 pt-4 dark:border-white/[0.08]">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h5 className="text-xs font-medium text-gray-700 dark:text-gray-200">计费方式</h5>
+                        <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+                          固定单价使用上方“单张消耗”；阶梯计费按尺寸、质量、参考图和遮罩预扣。
+                        </p>
+                      </div>
+                      <div className="flex rounded-xl bg-white/70 p-1 text-xs dark:bg-white/[0.04]">
+                        <button
+                          type="button"
+                          onClick={() => updateModel(model.id, { pricingMode: 'flat' })}
+                          className={`rounded-lg px-3 py-1.5 transition ${model.pricingMode === 'tiered' ? 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200' : 'bg-blue-500 text-white shadow-sm'}`}
+                        >
+                          固定单价
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateModel(model.id, { pricingMode: 'tiered' })}
+                          className={`rounded-lg px-3 py-1.5 transition ${model.pricingMode === 'tiered' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                        >
+                          阶梯计费
+                        </button>
+                      </div>
+                    </div>
+
+                    {model.pricingMode === 'tiered' && (
+                      <div className="space-y-3">
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => updateModel(model.id, { pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES })}
+                            className="rounded-lg border border-blue-200 bg-white/70 px-2.5 py-1 text-xs font-medium text-blue-600 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-white/[0.04] dark:text-blue-300 dark:hover:bg-blue-500/10"
+                          >
+                            填充官方 OpenAI 保守模板
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[560px] border-separate border-spacing-0 text-xs">
+                            <thead>
+                              <tr className="text-left text-gray-400 dark:text-gray-500">
+                                <th className="px-2 py-1 font-medium">尺寸档</th>
+                                {PRICE_QUALITIES.map((quality) => (
+                                  <th key={quality} className="px-2 py-1 font-medium">{quality}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {PRICE_TIERS.map((tier) => (
+                                <tr key={tier}>
+                                  <td className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">{tier}</td>
+                                  {PRICE_QUALITIES.map((quality) => (
+                                    <td key={`${tier}-${quality}`} className="px-2 py-1.5">
+                                      <input
+                                        value={pricingRules.sizeQualityPoints[tier][quality]}
+                                        onChange={(event) => updateTierPrice(model.id, tier, quality, event.target.value)}
+                                        min={1}
+                                        max={1000000}
+                                        type="number"
+                                        className="w-full rounded-lg border border-gray-200 bg-white/70 px-2 py-1 text-xs dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100"
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <label className="block">
+                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">每张参考图加价</span>
+                            <input value={pricingRules.referenceImagePoints} onChange={(event) => updatePricingNumber(model.id, 'referenceImagePoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">遮罩编辑加价</span>
+                            <input value={pricingRules.maskEditPoints} onChange={(event) => updatePricingNumber(model.id, 'maskEditPoints', event.target.value)} min={0} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">最低扣费</span>
+                            <input value={pricingRules.minimumPoints} onChange={(event) => updatePricingNumber(model.id, 'minimumPoints', event.target.value)} min={1} max={1000000} type="number" className="w-full rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </section>
 

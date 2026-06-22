@@ -4,6 +4,7 @@ import { useStore, submitTask, addImageFromFile, updateTaskInStore, removeMultip
 import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { normalizeImageSize } from '../lib/size'
+import { calculateGenerationPricing } from '../lib/pricing'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import Select from './Select'
 import SizePickerModal from './SizePickerModal'
@@ -171,9 +172,16 @@ export default function InputBar() {
   const qualityDisabled = isCodexCompatible
   const outputImageLimit = getOutputImageLimitForSettings(selectedModel)
   const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
-  const standardPointCost = auth.generationDefaults.standardPointCost
-  const currentPointCost = standardPointCost
-  const currentTotalPointCost = currentPointCost * Math.max(1, params.n || 1)
+  const pricingPreviewParams = normalizeParamsForSettings(params, selectedModel)
+  const pricingPreview = calculateGenerationPricing({
+    model: selectedModel,
+    standardPointCost: auth.generationDefaults.standardPointCost,
+    params: pricingPreviewParams,
+    imageCount: pricingPreviewParams.n,
+    inputImageCount: inputImages.length,
+    hasMask: Boolean(maskDraft),
+  })
+  const currentTotalPointCost = pricingPreview.totalPoints
   const hasInsufficientPoints = pointsBalance != null && pointsBalance < currentTotalPointCost
   const canSubmit = Boolean(prompt.trim())
   const submitTitle = !prompt.trim()
@@ -1292,7 +1300,7 @@ export default function InputBar() {
                 />
               </div>
               <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                {currentPointCost}/张
+                预计 {currentTotalPointCost} 积分
               </span>
             </div>
           </div>

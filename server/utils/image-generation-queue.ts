@@ -1,5 +1,5 @@
 import { createError } from 'h3'
-import type { TaskParams } from '../../src/types'
+import type { PricingBreakdown, TaskParams } from '../../src/types'
 import type { AppUser } from './auth'
 import { generateId } from './crypto'
 import type { AdminSettings, ServerApiConfig } from './admin-settings'
@@ -33,6 +33,7 @@ interface ImageGenerationJob {
   uploadToGallery: boolean
   reservedPoints: number
   costPerImage: number
+  pricing: PricingBreakdown
   units: ImageGenerationUnit[]
   status: ImageGenerationJobStatus
   error: string | null
@@ -47,6 +48,9 @@ interface ImageGenerationJob {
     pointsBalance: number
     chargedPoints: number
     refundedPoints: number
+    billingMode: PricingBreakdown['mode']
+    estimatedPoints: number
+    pricingBreakdown: PricingBreakdown
     galleryUploadError: string | null
   }) | null
   createdAt: number
@@ -79,6 +83,9 @@ export interface PublicImageGenerationJobStatus {
   pointsBalance?: number
   chargedPoints?: number
   refundedPoints?: number
+  billingMode?: PricingBreakdown['mode']
+  estimatedPoints?: number
+  pricingBreakdown?: PricingBreakdown
 }
 
 const JOB_CLEANUP_MS = 30 * 60 * 1000
@@ -230,6 +237,9 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
       pointsBalance: settlement.balance,
       chargedPoints: settlement.chargedPoints,
       refundedPoints: settlement.refundedPoints,
+      billingMode: job.pricing.mode,
+      estimatedPoints: job.pricing.totalPoints,
+      pricingBreakdown: job.pricing,
       galleryUploadError: null,
     }
     scheduleCleanup(job)
@@ -299,6 +309,9 @@ async function finishJobIfComplete(job: ImageGenerationJob) {
     pointsBalance,
     chargedPoints,
     refundedPoints,
+    billingMode: job.pricing.mode,
+    estimatedPoints: job.pricing.totalPoints,
+    pricingBreakdown: job.pricing,
     galleryUploadError,
   }
   scheduleCleanup(job)
@@ -384,9 +397,14 @@ export async function createImageGenerationJob(input: {
   maskDataUrl?: string
   uploadToGallery: boolean
   dailyPointsTarget: number
-  costPerImage: number
+  pricing: PricingBreakdown
 }) {
   const totalImages = Math.max(1, Math.floor(Number(input.params.n) || 1))
+  const pricing = {
+    ...input.pricing,
+    imageCount: totalImages,
+    totalPoints: input.pricing.pointsPerImage * totalImages,
+  }
   serviceConcurrentImageLimit = input.settings.serviceConcurrentImageLimit
   if (!input.isAdmin) {
     const unfinished = countUserUnfinishedUnits(input.user.id)
@@ -408,7 +426,7 @@ export async function createImageGenerationJob(input: {
   const reservation = await reserveGenerationPoints({
     userId: input.user.id,
     requestedImages: totalImages,
-    costPerImage: input.costPerImage,
+    costPerImage: pricing.pointsPerImage,
     dailyTarget: input.dailyPointsTarget,
     referenceId: jobId,
   })
@@ -425,7 +443,8 @@ export async function createImageGenerationJob(input: {
     maskDataUrl: input.maskDataUrl,
     uploadToGallery: input.uploadToGallery,
     reservedPoints: reservation.reservedPoints,
-    costPerImage: input.costPerImage,
+    costPerImage: pricing.pointsPerImage,
+    pricing,
     units: createUnits(totalImages),
     status: 'queued',
     error: null,
@@ -466,6 +485,9 @@ export function serializeImageGenerationJob(job: ImageGenerationJob): PublicImag
     error: job.error,
     uploadToGallery: job.uploadToGallery,
     privacyMode: !job.uploadToGallery,
+    billingMode: job.pricing.mode,
+    estimatedPoints: job.pricing.totalPoints,
+    pricingBreakdown: job.pricing,
   }
 
   if (job.status === 'done' && job.result) {

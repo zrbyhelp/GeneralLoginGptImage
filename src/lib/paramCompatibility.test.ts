@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PARAMS, type PublicGenerationModel } from '../types'
 import { getOutputImageLimitForSettings, normalizeParamsForSettings } from './paramCompatibility'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from './pricing'
 
 const openAIModel: PublicGenerationModel = {
   id: 'openai',
@@ -9,6 +10,8 @@ const openAIModel: PublicGenerationModel = {
   model: 'gpt-image-2',
   apiMode: 'images',
   codexCompatible: false,
+  pricingMode: 'flat',
+  pricingPreviewRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
 }
 
 const falModel: PublicGenerationModel = {
@@ -18,6 +21,8 @@ const falModel: PublicGenerationModel = {
   model: 'openai/gpt-image-2',
   apiMode: 'images',
   codexCompatible: false,
+  pricingMode: 'flat',
+  pricingPreviewRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
 }
 
 describe('parameter compatibility', () => {

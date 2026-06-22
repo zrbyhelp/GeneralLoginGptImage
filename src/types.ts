@@ -2,6 +2,31 @@
 
 export type ApiMode = 'images' | 'responses'
 export type ApiProvider = 'openai' | 'fal'
+export type PricingMode = 'flat' | 'tiered'
+export type SizePriceTier = '1K' | '2K' | '4K'
+export type QualityPricePoints = Record<TaskParams['quality'], number>
+
+export interface TieredPricingRules {
+  sizeQualityPoints: Record<SizePriceTier, QualityPricePoints>
+  referenceImagePoints: number
+  maskEditPoints: number
+  minimumPoints: number
+}
+
+export interface PricingBreakdown {
+  mode: PricingMode
+  sizeTier?: SizePriceTier
+  quality?: TaskParams['quality']
+  basePoints: number
+  referenceImageCount: number
+  referenceImagePoints: number
+  maskEditApplied: boolean
+  maskEditPoints: number
+  minimumPoints: number
+  pointsPerImage: number
+  imageCount: number
+  totalPoints: number
+}
 
 export interface AdminModelConfig {
   id: string
@@ -14,6 +39,8 @@ export interface AdminModelConfig {
   apiMode: ApiMode
   codexCompatible: boolean
   enabled: boolean
+  pricingMode: PricingMode
+  pricingRules: TieredPricingRules
 }
 
 export interface PublicGenerationModel {
@@ -23,6 +50,8 @@ export interface PublicGenerationModel {
   model: string
   apiMode: ApiMode
   codexCompatible: boolean
+  pricingMode: PricingMode
+  pricingPreviewRules: TieredPricingRules
 }
 
 export interface ApiProfile {
@@ -129,6 +158,12 @@ export interface TaskRecord {
   chargedPoints?: number
   /** 本次失败图片退款积分 */
   refundedPoints?: number
+  /** 本次计费方式 */
+  billingMode?: PricingMode
+  /** 提交任务时预估总积分 */
+  estimatedPoints?: number
+  /** 本次计费拆分 */
+  pricingBreakdown?: PricingBreakdown
   /** 结算后的最新积分余额 */
   pointsBalance?: number
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */

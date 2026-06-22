@@ -1,5 +1,6 @@
 import type { AdminModelConfig, ApiMode, ApiProvider, PublicGenerationModel } from '../../src/types'
 import { createError } from 'h3'
+import { normalizePricingMode, normalizeTieredPricingRules } from '../../src/lib/pricing'
 import { getDb } from './db'
 
 export type ServerApiConfig = Omit<AdminModelConfig, 'enabled'>
@@ -87,6 +88,8 @@ function createServerApiConfig(defaults: Partial<ServerApiConfig> & { provider: 
     timeout: parsePositiveInt(defaults.timeout, 600, 10, 3600),
     apiMode: provider === 'fal' ? 'images' : parseApiMode(defaults.apiMode),
     codexCompatible: provider === 'openai' ? Boolean(defaults.codexCompatible) : false,
+    pricingMode: normalizePricingMode(defaults.pricingMode),
+    pricingRules: normalizeTieredPricingRules(defaults.pricingRules),
   }
 }
 
@@ -155,6 +158,8 @@ function normalizeModels(input: unknown, fallbackModels: AdminModelConfig[]): Ad
       apiMode: record.apiMode,
       codexCompatible: Boolean(record.codexCompatible ?? record.codexCli),
       enabled: typeof record.enabled === 'boolean' ? record.enabled : true,
+      pricingMode: record.pricingMode,
+      pricingRules: record.pricingRules,
     })
   })
   return models.length ? models : [legacyApiConfigFromRuntime()]
@@ -234,6 +239,8 @@ export function getPublicGenerationModels(settings: AdminSettings): PublicGenera
       model: model.model,
       apiMode: model.apiMode,
       codexCompatible: model.codexCompatible,
+      pricingMode: model.pricingMode,
+      pricingPreviewRules: model.pricingRules,
     }))
 }
 

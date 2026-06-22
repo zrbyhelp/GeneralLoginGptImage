@@ -171,6 +171,12 @@ export default function DetailModal() {
   const queueText = task.queuePosition != null && task.queuePosition > 0
     ? `排队中 · 前方 ${Math.max(0, task.queuePosition - 1)} 张`
     : '排队中'
+  const pricingBreakdown = task.pricingBreakdown
+  const billedPoints = typeof task.chargedPoints === 'number'
+    ? task.chargedPoints
+    : task.estimatedPoints ?? pricingBreakdown?.totalPoints
+  const formatPoints = (value: number | null | undefined) =>
+    typeof value === 'number' ? `${value} 积分` : '未知'
 
   const formatTime = (ts: number | null) => {
     if (!ts) return ''
@@ -547,6 +553,37 @@ export default function DetailModal() {
                 {task.apiCodexCompatible && (
                   <span className="ml-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">Codex</span>
                 )}
+              </div>
+            )}
+            {(pricingBreakdown || typeof task.estimatedPoints === 'number' || typeof task.chargedPoints === 'number') && (
+              <div className="mb-3 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-white/[0.03]">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-gray-400 dark:text-gray-500">计费</span>
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">{formatPoints(billedPoints)}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-gray-500 dark:text-gray-400">
+                  <span>方式：{(task.billingMode ?? pricingBreakdown?.mode) === 'tiered' ? '阶梯计费' : '固定单价'}</span>
+                  <span>预计：{formatPoints(task.estimatedPoints ?? pricingBreakdown?.totalPoints)}</span>
+                  {pricingBreakdown && (
+                    <>
+                      <span>单图：{formatPoints(pricingBreakdown.pointsPerImage)}</span>
+                      <span>数量：{pricingBreakdown.imageCount}</span>
+                      {pricingBreakdown.mode === 'tiered' && (
+                        <>
+                          <span>尺寸档：{pricingBreakdown.sizeTier ?? '-'}</span>
+                          <span>质量：{pricingBreakdown.quality ?? '-'}</span>
+                          <span>基础：{formatPoints(pricingBreakdown.basePoints)}</span>
+                          <span>参考图：{pricingBreakdown.referenceImageCount} 张 / {formatPoints(pricingBreakdown.referenceImagePoints)}</span>
+                          <span>遮罩：{pricingBreakdown.maskEditApplied ? formatPoints(pricingBreakdown.maskEditPoints) : '无'}</span>
+                          <span>最低：{formatPoints(pricingBreakdown.minimumPoints)}</span>
+                        </>
+                      )}
+                    </>
+                  )}
+                  {typeof task.refundedPoints === 'number' && task.refundedPoints > 0 && (
+                    <span>退款：{formatPoints(task.refundedPoints)}</span>
+                  )}
+                </div>
               </div>
             )}
             <div className="grid grid-cols-2 gap-2 text-xs mb-4">

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import type { ServerApiConfig } from './admin-settings'
 import { callServerImageApi } from './server-image-api'
 
@@ -12,6 +13,8 @@ const config: ServerApiConfig = {
   timeout: 10,
   apiMode: 'responses',
   codexCompatible: false,
+  pricingMode: 'flat',
+  pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
 }
 
 const imagesConfig: ServerApiConfig = {

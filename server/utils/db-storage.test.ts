@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { strFromU8, unzipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskParams } from '../../src/types'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import { getAdminSettings, updateAdminSettings } from './admin-settings'
 import { buildAuditExportZip } from './audit-export'
 import {
@@ -83,6 +84,8 @@ describe('SQLite-backed server storage', () => {
         codexCompatible: true,
         timeout: 600,
         enabled: true,
+        pricingMode: 'flat',
+        pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
       }],
       defaultModelId: 'custom-model',
       hourlyImageLimit: 7,

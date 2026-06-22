@@ -30,6 +30,7 @@ import { getFalErrorMessage, getFalQueuedImageResult, getFalQueueStatus } from '
 import { validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
+import { calculateGenerationPricing } from './lib/pricing'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
 import { getInitialDisplayPreferences, type AppLocale, type AppTheme } from './lib/i18n'
 
@@ -417,15 +418,70 @@ function getTaskModelId(task?: Pick<TaskRecord, 'modelId'> | null) {
   return useStore.getState().auth.generationDefaults.defaultModelId || models[0]?.id || ''
 }
 
+function estimateTaskPricing(input: {
+  model?: PublicGenerationModel | null
+  params: TaskParams
+  inputImageCount?: number
+  hasMask?: boolean
+}) {
+  const state = useStore.getState()
+  return calculateGenerationPricing({
+    model: input.model,
+    standardPointCost: state.auth.generationDefaults.standardPointCost,
+    params: input.params,
+    imageCount: input.params.n,
+    inputImageCount: input.inputImageCount ?? 0,
+    hasMask: Boolean(input.hasMask),
+  })
+}
+
 function isRunningOpenAITask(task: TaskRecord) {
   return isTaskInFlight(task) && !task.queueJobId && isOpenAITask(task)
 }
 
 function applyQueueStatusToTask(taskId: string, status: ImageGenerationJobStatus) {
-  if (status.status !== 'queued' && status.status !== 'running') return
   const current = useStore.getState().tasks.find((task) => task.id === taskId)
   if (!current || !isTaskInFlight(current)) return
+  const billingPatch: Partial<TaskRecord> = {
+    billingMode: status.billingMode ?? current.billingMode,
+    estimatedPoints: status.estimatedPoints ?? current.estimatedPoints,
+    pricingBreakdown: status.pricingBreakdown ?? current.pricingBreakdown,
+    chargedPoints: status.chargedPoints ?? current.chargedPoints,
+    refundedPoints: status.refundedPoints ?? current.refundedPoints,
+    pointsBalance: status.pointsBalance ?? current.pointsBalance,
+  }
+
+  if (typeof status.pointsBalance === 'number') {
+    const currentUser = useStore.getState().auth.user
+    if (currentUser) {
+      useStore.getState().setAuth({
+        user: {
+          ...currentUser,
+          pointsBalance: status.pointsBalance,
+        },
+      })
+    }
+  }
+
+  if (status.status === 'error') {
+    updateTaskInStore(taskId, {
+      ...billingPatch,
+      queueJobId: status.jobId,
+      queuePosition: null,
+      queueCompletedImages: status.completedImages,
+      queueTotalImages: status.totalImages,
+      status: 'error',
+      error: status.error || '生成失败',
+      falRecoverable: false,
+      finishedAt: Date.now(),
+      elapsed: Date.now() - current.createdAt,
+    })
+    return
+  }
+
+  if (status.status !== 'queued' && status.status !== 'running') return
   updateTaskInStore(taskId, {
+    ...billingPatch,
     queueJobId: status.jobId,
     queuePosition: status.queuePosition,
     queueCompletedImages: status.completedImages,
@@ -669,6 +725,9 @@ async function finishTaskWithResult(
     privacyMode: result.privacyMode ?? task.privacyMode,
     chargedPoints: result.chargedPoints,
     refundedPoints: result.refundedPoints,
+    billingMode: result.billingMode ?? task.billingMode,
+    estimatedPoints: result.estimatedPoints ?? task.estimatedPoints,
+    pricingBreakdown: result.pricingBreakdown ?? task.pricingBreakdown,
     pointsBalance: result.pointsBalance,
     outputImages: outputIds,
     actualParams: shouldStoreApiResponseMetadata ? { ...result.actualParams, n: outputIds.length } : undefined,
@@ -731,8 +790,14 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     return
   }
 
-  const costPerImage = auth.generationDefaults.standardPointCost
-  const requiredPoints = costPerImage * Math.max(1, Math.floor(Number(params.n) || 1))
+  const initialNormalizedParams = normalizeParamsForSettings(params, selectedModel)
+  const initialPricing = estimateTaskPricing({
+    model: selectedModel,
+    params: initialNormalizedParams,
+    inputImageCount: inputImages.length,
+    hasMask: Boolean(maskDraft),
+  })
+  const requiredPoints = initialPricing.totalPoints
   const pointsBalance = typeof auth.user?.pointsBalance === 'number' ? auth.user.pointsBalance : null
   if (pointsBalance != null && pointsBalance < requiredPoints) {
     setConfirmDialog({
@@ -805,6 +870,12 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
   if (Object.keys(normalizedParamPatch).length) {
     useStore.getState().setParams(normalizedParamPatch)
   }
+  const pricing = estimateTaskPricing({
+    model: selectedModel,
+    params: normalizedParams,
+    inputImageCount: orderedInputImages.length,
+    hasMask: Boolean(maskImageId),
+  })
 
   const taskId = genId()
   const task: TaskRecord = {
@@ -818,6 +889,9 @@ export async function submitTask(options: SubmitTaskOptions = {}) {
     apiCodexCompatible: selectedModel.codexCompatible,
     uploadToGallery,
     privacyMode: !uploadToGallery,
+    billingMode: pricing.mode,
+    estimatedPoints: pricing.totalPoints,
+    pricingBreakdown: pricing,
     inputImageIds: orderedInputImages.map((i) => i.id),
     maskTargetImageId,
     maskImageId,
@@ -905,7 +979,10 @@ async function executeTask(taskId: string) {
     await finishTaskWithResult(taskId, task, result, maskDataUrl)
   } catch (err) {
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
-    if (!isTaskInFlight(latestTask)) return
+    if (!isTaskInFlight(latestTask)) {
+      if (latestTask.status === 'error') useStore.getState().setDetailTaskId(taskId)
+      return
+    }
     if (isUserConcurrentLimitError(err) || isPointsInsufficientError(err)) {
       useStore.getState().setTasks(useStore.getState().tasks.filter((item) => item.id !== taskId))
       await dbDeleteTask(taskId)
@@ -999,6 +1076,12 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
   const modelId = getTaskModelId(task)
   const selectedModel = getAvailableModels().find((model) => model.id === modelId)
   const normalizedParams = normalizeParamsForSettings(task.params, selectedModel)
+  const pricing = estimateTaskPricing({
+    model: selectedModel,
+    params: normalizedParams,
+    inputImageCount: task.inputImageIds.length,
+    hasMask: Boolean(task.maskImageId),
+  })
   const taskId = genId()
   const newTask: TaskRecord = {
     id: taskId,
@@ -1009,6 +1092,9 @@ export async function retryTask(task: TaskRecord, options: { confirmed?: boolean
     apiProfileName: selectedModel?.name ?? task.apiProfileName ?? '默认模型',
     apiModel: selectedModel?.model ?? task.apiModel ?? '服务端模型',
     apiCodexCompatible: selectedModel?.codexCompatible ?? task.apiCodexCompatible,
+    billingMode: pricing.mode,
+    estimatedPoints: pricing.totalPoints,
+    pricingBreakdown: pricing,
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TaskParams } from '../../src/types'
+import type { PricingBreakdown, TaskParams } from '../../src/types'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import type { AdminSettings, ServerApiConfig } from './admin-settings'
 import type { AppUser } from './auth'
 import {
@@ -55,6 +56,8 @@ const apiConfig: ServerApiConfig = {
   timeout: 10,
   apiMode: 'images',
   codexCompatible: false,
+  pricingMode: 'flat',
+  pricingRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
 }
 
 const params: TaskParams = {
@@ -74,6 +77,21 @@ const user: AppUser = {
   name: null,
   avatarUrl: null,
   status: 'ACTIVE',
+}
+
+function pricing(pointsPerImage = 1, imageCount = 1): PricingBreakdown {
+  return {
+    mode: 'flat',
+    basePoints: pointsPerImage,
+    referenceImageCount: 0,
+    referenceImagePoints: 0,
+    maskEditApplied: false,
+    maskEditPoints: 0,
+    minimumPoints: pointsPerImage,
+    pointsPerImage,
+    imageCount,
+    totalPoints: pointsPerImage * imageCount,
+  }
 }
 
 const otherUser: AppUser = {
@@ -165,7 +183,7 @@ describe('image generation queue', () => {
       inputImageDataUrls: [],
       uploadToGallery: false,
       dailyPointsTarget: 100,
-      costPerImage: 1,
+      pricing: pricing(1, 2),
     })
     await flushPromises()
 
@@ -180,7 +198,7 @@ describe('image generation queue', () => {
       inputImageDataUrls: [],
       uploadToGallery: false,
       dailyPointsTarget: 100,
-      costPerImage: 1,
+      pricing: pricing(1, 2),
     })).rejects.toMatchObject({
       statusCode: 429,
       statusMessage: '目前最大同时生成张数是 3，请等待生成完成后继续',
@@ -205,7 +223,7 @@ describe('image generation queue', () => {
       inputImageDataUrls: [],
       uploadToGallery: false,
       dailyPointsTarget: 100,
-      costPerImage: 1,
+      pricing: pricing(),
     })
     const secondJobStatus = await createImageGenerationJob({
       user: otherUser,
@@ -218,7 +236,7 @@ describe('image generation queue', () => {
       inputImageDataUrls: [],
       uploadToGallery: false,
       dailyPointsTarget: 100,
-      costPerImage: 1,
+      pricing: pricing(),
     })
     await flushPromises()
 
@@ -257,7 +275,7 @@ describe('image generation queue', () => {
       inputImageDataUrls: [],
       uploadToGallery: false,
       dailyPointsTarget: 100,
-      costPerImage: 1,
+      pricing: pricing(),
     })
     await flushPromises()
 
@@ -272,10 +290,71 @@ describe('image generation queue', () => {
       inputImageDataUrls: [],
       uploadToGallery: false,
       dailyPointsTarget: 100,
-      costPerImage: 1,
+      pricing: pricing(1, 2),
     })
     await flushPromises()
 
     expect(apiMocks.callServerImageApi).toHaveBeenCalledTimes(3)
+  })
+
+  it('reserves and refunds using the tiered per-image price', async () => {
+    const tieredPricing: PricingBreakdown = {
+      ...pricing(72000, 2),
+      mode: 'tiered',
+      sizeTier: '2K',
+      quality: 'high',
+      basePoints: 72000,
+      minimumPoints: 1000,
+      totalPoints: 144000,
+    }
+    pointMocks.reserveGenerationPoints.mockResolvedValueOnce({
+      balance: 1000,
+      lastDailyRefillDate: '2026-05-26',
+      dailyRefilled: false,
+      reservedPoints: 144000,
+    })
+    pointMocks.settleGenerationPoints.mockResolvedValueOnce({
+      balance: 73000,
+      chargedPoints: 72000,
+      refundedPoints: 72000,
+    })
+    apiMocks.callServerImageApi
+      .mockResolvedValueOnce({ images: ['data:image/png;base64,a'] })
+      .mockRejectedValueOnce(new Error('HTTP 504'))
+
+    const status = await createImageGenerationJob({
+      user,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 2, userConcurrentImageLimit: 3 }),
+      apiConfig,
+      prompt: 'prompt',
+      params: { ...params, n: 2 },
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: tieredPricing,
+    })
+    await flushPromises()
+
+    expect(pointMocks.reserveGenerationPoints).toHaveBeenCalledWith(expect.objectContaining({
+      requestedImages: 2,
+      costPerImage: 72000,
+    }))
+    expect(pointMocks.settleGenerationPoints).toHaveBeenCalledWith(expect.objectContaining({
+      actualImages: 1,
+      costPerImage: 72000,
+      reservedPoints: 144000,
+    }))
+    expect(serializeImageGenerationJob(getImageGenerationJob(status.jobId)!)).toMatchObject({
+      status: 'done',
+      chargedPoints: 72000,
+      refundedPoints: 72000,
+      billingMode: 'tiered',
+      estimatedPoints: 144000,
+      pricingBreakdown: expect.objectContaining({
+        pointsPerImage: 72000,
+        totalPoints: 144000,
+      }),
+    })
   })
 })

@@ -1,4 +1,4 @@
-import type { ApiProvider, AppSettings, TaskParams } from '../types'
+import type { ApiProvider, AppSettings, PricingBreakdown, PricingMode, TaskParams } from '../types'
 
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
@@ -55,6 +55,12 @@ export interface CallApiResult {
   chargedPoints?: number
   /** 实际退款的积分 */
   refundedPoints?: number
+  /** 服务端确认的计费方式 */
+  billingMode?: PricingMode
+  /** 服务端预估总积分 */
+  estimatedPoints?: number
+  /** 服务端计费拆分 */
+  pricingBreakdown?: PricingBreakdown
   /** 扣分后的最新余额 */
   pointsBalance?: number
 }

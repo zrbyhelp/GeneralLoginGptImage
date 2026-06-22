@@ -4,6 +4,7 @@ import { requireUser, isAdminUser } from '../../utils/auth'
 import { assertApiConfigUsable, getAdminSettings, selectGenerationModel } from '../../utils/admin-settings'
 import { countRecentGeneratedImages } from '../../utils/generation-usage'
 import { createImageGenerationJob } from '../../utils/image-generation-queue'
+import { calculateGenerationPricing } from '../../../src/lib/pricing'
 
 const DEFAULT_PARAMS: TaskParams = {
   size: 'auto',
@@ -28,6 +29,19 @@ const FORBIDDEN_API_KEYS = new Set([
   'activeProfileId',
   'timeout',
   'usePremiumApi',
+  'pricingMode',
+  'pricingRules',
+  'pricingPreviewRules',
+  'pricingBreakdown',
+  'billingMode',
+  'estimatedPoints',
+  'costPerImage',
+  'pointsPerImage',
+  'reservedPoints',
+  'chargedPoints',
+  'refundedPoints',
+  'price',
+  'points',
 ])
 
 const ALLOWED_PARAM_KEYS = new Set(['size', 'quality', 'output_format', 'output_compression', 'moderation', 'n'])
@@ -97,7 +111,14 @@ export default defineEventHandler(async (event) => {
   const privacyMode = !uploadToGallery
   const apiConfig = selectGenerationModel(settings, body.modelId)
   const params = normalizeParams(body.params, apiConfig.provider, apiConfig.codexCompatible)
-  const costPerImage = settings.standardPointCost
+  const pricing = calculateGenerationPricing({
+    model: apiConfig,
+    standardPointCost: settings.standardPointCost,
+    params,
+    imageCount: params.n,
+    inputImageCount: inputImageDataUrls.length,
+    hasMask: Boolean(maskDataUrl),
+  })
   assertApiConfigUsable(apiConfig, apiConfig.name || 'API')
 
   if (!isAdmin) {
@@ -124,6 +145,6 @@ export default defineEventHandler(async (event) => {
     maskDataUrl,
     uploadToGallery,
     dailyPointsTarget: settings.dailyPointsTarget,
-    costPerImage,
+    pricing,
   })
 })

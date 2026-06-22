@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/apiProfiles'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from './lib/pricing'
 import type { TaskRecord } from './types'
 import { editOutputs, markInterruptedOpenAIRunningTasks, submitTask, useStore } from './store'
 
@@ -43,6 +44,15 @@ const testModel = {
   model: 'gpt-image-2',
   apiMode: 'images' as const,
   codexCompatible: false,
+  pricingMode: 'flat' as const,
+  pricingPreviewRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
+}
+
+const tieredModel = {
+  ...testModel,
+  id: 'model-tiered',
+  name: '阶梯模型',
+  pricingMode: 'tiered' as const,
 }
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
@@ -282,6 +292,77 @@ describe('submit task safeguards', () => {
       title: '积分不足',
       confirmText: '前往商店',
       message: expect.stringContaining('https://pay.ldxp.cn/shop/QEJABMGR'),
+    }))
+  })
+
+  it('estimates tiered model cost before confirmation and stores the breakdown locally', async () => {
+    useStore.setState({
+      auth: {
+        ...useStore.getState().auth,
+        generationDefaults: {
+          ...useStore.getState().auth.generationDefaults,
+          models: [tieredModel],
+          defaultModelId: tieredModel.id,
+        },
+      },
+      selectedModelId: tieredModel.id,
+      params: { ...DEFAULT_PARAMS, size: '2048x2048', quality: 'high', n: 2 },
+    })
+
+    await submitTask()
+    const dialog = vi.mocked(useStore.getState().setConfirmDialog).mock.calls[0][0]
+    expect(dialog?.message).toContain('预计消耗 144000 积分')
+
+    dialog?.action()
+    await flushPromises()
+
+    expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
+      modelId: tieredModel.id,
+      billingMode: 'tiered',
+      estimatedPoints: 144000,
+      pricingBreakdown: expect.objectContaining({
+        sizeTier: '2K',
+        quality: 'high',
+        pointsPerImage: 72000,
+        totalPoints: 144000,
+      }),
+    }))
+  })
+
+  it('uses tiered estimated points for the insufficient balance guard', async () => {
+    useStore.setState({
+      auth: {
+        loading: false,
+        authenticated: true,
+        isAdmin: false,
+        user: {
+          id: 'user-a',
+          account: 'user-a',
+          email: null,
+          username: null,
+          name: null,
+          avatarUrl: null,
+          status: 'ACTIVE',
+          pointsBalance: 10000,
+        },
+        generationDefaults: {
+          dailyPointsTarget: 100,
+          standardPointCost: 1,
+          galleryUploadDefault: false,
+          models: [tieredModel],
+          defaultModelId: tieredModel.id,
+        },
+      },
+      selectedModelId: tieredModel.id,
+      params: { ...DEFAULT_PARAMS, size: '2048x2048', quality: 'high', n: 2 },
+    })
+
+    await submitTask()
+
+    expect(dbMocks.putTask).not.toHaveBeenCalled()
+    expect(useStore.getState().setConfirmDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '积分不足',
+      message: expect.stringContaining('本次生成需要 144000 积分'),
     }))
   })
 

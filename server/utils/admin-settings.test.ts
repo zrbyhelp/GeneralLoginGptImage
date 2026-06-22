@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultAdminSettings, getPublicGenerationModels, selectGenerationModel, updateAdminSettings, getAdminSettings } from './admin-settings'
+import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from '../../src/lib/pricing'
 import { setDatabasePathForTests } from './db'
 
 describe('admin settings models', () => {
@@ -56,8 +57,13 @@ describe('admin settings models', () => {
       model: 'gpt-image-2',
       codexCompatible: true,
       enabled: true,
+      pricingMode: 'flat',
     })
     expect(getPublicGenerationModels(settings)[0]).not.toHaveProperty('apiKey')
+    expect(getPublicGenerationModels(settings)[0]).toMatchObject({
+      pricingMode: 'flat',
+      pricingPreviewRules: DEFAULT_OPENAI_TIERED_PRICING_RULES,
+    })
   })
 
   it('selects the default model and rejects disabled models', () => {
@@ -102,6 +108,11 @@ describe('admin settings models', () => {
       apiMode: 'responses' as const,
       codexCompatible: true,
       enabled: true,
+      pricingMode: 'tiered' as const,
+      pricingRules: {
+        ...DEFAULT_OPENAI_TIERED_PRICING_RULES,
+        referenceImagePoints: 1234,
+      },
     }
     await updateAdminSettings({ models: [model], defaultModelId: model.id })
 
@@ -109,5 +120,12 @@ describe('admin settings models', () => {
     expect(settings.models).toHaveLength(1)
     expect(settings.models[0]).toMatchObject(model)
     expect(settings.defaultModelId).toBe(model.id)
+    expect(getPublicGenerationModels(settings)[0]).toMatchObject({
+      pricingMode: 'tiered',
+      pricingPreviewRules: expect.objectContaining({
+        referenceImagePoints: 1234,
+      }),
+    })
+    expect(getPublicGenerationModels(settings)[0]).not.toHaveProperty('pricingRules')
   })
 })
