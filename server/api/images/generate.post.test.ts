@@ -157,4 +157,25 @@ describe('/api/images/generate', () => {
     })
     expect(queueMocks.createImageGenerationJob).not.toHaveBeenCalled()
   })
+
+  it('ignores legacy usePremiumApi from cached clients', async () => {
+    readBodyMock.mockResolvedValue({
+      prompt: 'prompt',
+      modelId: flatModel.id,
+      usePremiumApi: true,
+      params: { ...DEFAULT_PARAMS, usePremiumApi: true },
+    })
+
+    const handler = await loadHandler()
+    await handler({})
+
+    expect(queueMocks.createImageGenerationJob).toHaveBeenCalledWith(expect.objectContaining({
+      apiConfig: flatModel,
+      pricing: expect.objectContaining({
+        mode: 'flat',
+        pointsPerImage: 9,
+        totalPoints: 9,
+      }),
+    }))
+  })
 })

@@ -28,7 +28,6 @@ const FORBIDDEN_API_KEYS = new Set([
   'profiles',
   'activeProfileId',
   'timeout',
-  'usePremiumApi',
   'pricingMode',
   'pricingRules',
   'pricingPreviewRules',
@@ -43,11 +42,13 @@ const FORBIDDEN_API_KEYS = new Set([
   'price',
   'points',
 ])
+const LEGACY_IGNORED_KEYS = new Set(['usePremiumApi'])
 
 const ALLOWED_PARAM_KEYS = new Set(['size', 'quality', 'output_format', 'output_compression', 'moderation', 'n'])
 
 function assertNoApiOverrides(record: Record<string, unknown>, label = '请求') {
   for (const key of Object.keys(record)) {
+    if (LEGACY_IGNORED_KEYS.has(key)) continue
     if (FORBIDDEN_API_KEYS.has(key)) {
       throw createError({ statusCode: 400, statusMessage: `${label}不能包含 API 配置字段：${key}` })
     }
@@ -58,6 +59,7 @@ function normalizeParams(input: unknown, provider: string, codexCompatible: bool
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   assertNoApiOverrides(record, '参数')
   for (const key of Object.keys(record)) {
+    if (LEGACY_IGNORED_KEYS.has(key)) continue
     if (!ALLOWED_PARAM_KEYS.has(key)) {
       throw createError({ statusCode: 400, statusMessage: `不支持的生成参数：${key}` })
     }
