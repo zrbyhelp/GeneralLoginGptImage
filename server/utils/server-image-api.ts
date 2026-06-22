@@ -294,7 +294,7 @@ function compactRecord(record: Record<string, unknown>) {
   )
 }
 
-function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdminDefaults): GenerateContentConfig {
+function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdminDefaults, options: { vertexMode?: boolean } = {}): GenerateContentConfig {
   const gemini = params.gemini
   const mediaResolution = mapGeminiMediaResolution(gemini?.mediaResolution)
   const generationConfig: Record<string, unknown> = {
@@ -312,9 +312,11 @@ function createGeminiGenerationConfig(params: TaskParams, defaults?: GeminiAdmin
   if (defaults?.responseMimeType) generationConfig.responseMimeType = defaults.responseMimeType
   if (defaults?.imageConfig) generationConfig.imageConfig = defaults.imageConfig
 
-  const userThinkingConfig = mapGeminiThinkingConfig(gemini?.thinkingMode)
-  const thinkingConfig = userThinkingConfig ?? defaults?.thinkingConfig
-  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig
+  if (!options.vertexMode) {
+    const userThinkingConfig = mapGeminiThinkingConfig(gemini?.thinkingMode)
+    const thinkingConfig = userThinkingConfig ?? defaults?.thinkingConfig
+    if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig
+  }
 
   return compactRecord(generationConfig) as GenerateContentConfig
 }
@@ -338,7 +340,7 @@ function readGeminiInlineImagePart(part: unknown, fallbackMime = 'image/png') {
   return normalizeBase64Image(data, mimeType || fallbackMime)
 }
 
-function parseGeminiImageResults(payload: unknown) {
+function parseGeminiImageResults(payload: unknown, maxImages = Number.POSITIVE_INFINITY) {
   const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
   const candidates = Array.isArray(record.candidates) ? record.candidates : []
   const parts: unknown[] = []
@@ -354,6 +356,7 @@ function parseGeminiImageResults(payload: unknown) {
   const images = parts
     .map((part) => readGeminiInlineImagePart(part))
     .filter((image): image is string => Boolean(image))
+    .slice(0, maxImages)
   if (!images.length) throw new Error('Gemini 未返回可用图片数据')
   return images
 }
@@ -406,7 +409,7 @@ async function callGeminiGenerateContentApi(opts: {
   ]
   const safetySettings = createGeminiSafetySettings(opts.params, opts.config.geminiDefaults)
   const config = compactRecord({
-    ...createGeminiGenerationConfig(opts.params, opts.config.geminiDefaults),
+    ...createGeminiGenerationConfig(opts.params, opts.config.geminiDefaults, { vertexMode: opts.config.apiMode === 'geminiVertex' }),
     safetySettings,
     tools: opts.params.gemini?.networkSearch ? [{ googleSearch: {} }] : undefined,
   }) as GenerateContentConfig
@@ -430,7 +433,7 @@ async function callGeminiGenerateContentApi(opts: {
       },
       config,
     })
-    const images = parseGeminiImageResults(payload)
+    const images = parseGeminiImageResults(payload, 1)
     const searchGroundingCount = opts.params.gemini?.networkSearch
       ? parseGeminiSearchGroundingCount(payload)
       : 0

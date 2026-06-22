@@ -362,6 +362,9 @@ describe('server image API Gemini generateContent mode', () => {
       'https://zenmux.ai/api/vertex-ai/v1/publishers/google/models/gemini-3-pro-image:generateContent',
       expect.objectContaining({ method: 'POST' }),
     )
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.generationConfig).not.toHaveProperty('thinkingConfig')
   })
 
   it('enables Gemini Google Search grounding and returns actual query count', async () => {
@@ -424,5 +427,31 @@ describe('server image API Gemini generateContent mode', () => {
     })
 
     expect(result.images).toEqual(['data:image/webp;base64,snake-image'])
+  })
+
+  it('keeps only one Gemini image from each single upstream call', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              { inlineData: { mimeType: 'image/png', data: 'first-image' } },
+              { inlineData: { mimeType: 'image/png', data: 'second-image' } },
+            ],
+          },
+        },
+      ],
+    }), { status: 200 }))
+
+    const result = await callServerImageApi({
+      config: geminiConfig,
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: [],
+    })
+
+    expect(result.images).toEqual(['data:image/png;base64,first-image'])
+    expect(result.actualParams).toMatchObject({ n: 1 })
+    expect(result.actualParamsList).toHaveLength(1)
   })
 })

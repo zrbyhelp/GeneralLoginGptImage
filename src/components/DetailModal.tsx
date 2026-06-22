@@ -617,11 +617,6 @@ export default function DetailModal() {
                     <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.temperature ?? '自动'}</span>
                   </div>
                   <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                    <span className="text-gray-400 dark:text-gray-500">思考</span>
-                    <br />
-                    <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.thinkingMode ?? 'auto'}</span>
-                  </div>
-                  <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
                     <span className="text-gray-400 dark:text-gray-500">安全</span>
                     <br />
                     <span className="font-medium text-gray-700 dark:text-gray-300">{task.params.gemini?.safetyLevel ?? 'default'}</span>
