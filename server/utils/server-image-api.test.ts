@@ -149,6 +149,7 @@ describe('server image API Responses mode', () => {
 
 describe('server image API Images mode', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -205,6 +206,92 @@ describe('server image API Images mode', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  it('retries when the upstream image connection is interrupted', async () => {
+    const disconnect = new TypeError('fetch failed')
+    Object.defineProperty(disconnect, 'cause', {
+      value: { code: 'UND_ERR_SOCKET' },
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(disconnect)
+      .mockResolvedValueOnce(imagesImage('image-a'))
+
+    const result = await callServerImageApi({
+      config: { ...imagesConfig, codexCompatible: true },
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.images).toEqual(['data:image/png;base64,image-a'])
+  })
+
+  it('allows up to five upstream image attempts for disconnects', async () => {
+    vi.useFakeTimers()
+    const disconnect = new TypeError('fetch failed')
+    Object.defineProperty(disconnect, 'cause', {
+      value: { code: 'UND_ERR_SOCKET' },
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(disconnect)
+      .mockRejectedValueOnce(disconnect)
+      .mockRejectedValueOnce(disconnect)
+      .mockRejectedValueOnce(disconnect)
+      .mockResolvedValueOnce(imagesImage('image-a'))
+
+    const promise = callServerImageApi({
+      config: { ...imagesConfig, codexCompatible: true },
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: [],
+    })
+
+    await vi.runAllTimersAsync()
+    const result = await promise
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(result.images).toEqual(['data:image/png;base64,image-a'])
+  })
+
+  it('retries when the upstream image response body is interrupted', async () => {
+    const terminated = new TypeError('terminated')
+    Object.defineProperty(terminated, 'cause', {
+      value: { code: 'UND_ERR_SOCKET' },
+    })
+    const brokenResponse = new Response(JSON.stringify({ data: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    vi.spyOn(brokenResponse, 'json').mockRejectedValueOnce(terminated)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(brokenResponse)
+      .mockResolvedValueOnce(imagesImage('image-a'))
+
+    const result = await callServerImageApi({
+      config: { ...imagesConfig, codexCompatible: true },
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.images).toEqual(['data:image/png;base64,image-a'])
+  })
+
+  it('does not retry explicit upstream HTTP errors', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('bad request', { status: 400 }))
+
+    await expect(callServerImageApi({
+      config: { ...imagesConfig, codexCompatible: true },
+      prompt: 'prompt',
+      params: { ...params, n: 1 },
+      inputImageDataUrls: [],
+    })).rejects.toThrow('bad request')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('omits unsupported image parameters for Codex compatible models', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imagesImage('image-a'))
 
@@ -219,7 +306,7 @@ describe('server image API Images mode', () => {
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body).toMatchObject({
       model: imagesConfig.model,
-      prompt: expect.stringContaining('Do not rewrite it'),
+      prompt: 'prompt',
     })
     expect(body).not.toHaveProperty('size')
     expect(body).not.toHaveProperty('quality')

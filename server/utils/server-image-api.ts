@@ -27,6 +27,8 @@ const MIME_MAP: Record<string, string> = {
   webp: 'image/webp',
 }
 const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+const UPSTREAM_FETCH_ATTEMPTS = 5
+const UPSTREAM_RETRY_DELAYS_MS = [0, 1000, 2000, 3000]
 
 function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, '')
@@ -79,9 +81,11 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string) {
 
 async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, signal?: AbortSignal) {
   if (isDataUrl(url)) return url
-  const response = await fetch(url, { cache: 'no-store', signal })
-  if (!response.ok) throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
-  return blobToDataUrl(await response.blob(), fallbackMime)
+  return withDisconnectRetry(async () => {
+    const response = await fetch(url, { cache: 'no-store', signal })
+    if (!response.ok) throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
+    return blobToDataUrl(await response.blob(), fallbackMime)
+  })
 }
 
 async function getApiErrorMessage(response: Response) {
@@ -118,6 +122,43 @@ function createReadableErrorMessage(error: unknown) {
     .replace(/\s+/g, ' ')
     .trim()
   return withoutTags ? withoutTags.slice(0, 500) : '上游返回 HTML 错误页面'
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object') return ''
+  const record = error as Record<string, unknown>
+  if (typeof record.code === 'string') return record.code
+  const cause = record.cause
+  if (cause && typeof cause === 'object' && typeof (cause as Record<string, unknown>).code === 'string') {
+    return String((cause as Record<string, unknown>).code)
+  }
+  return ''
+}
+
+function isDisconnectError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  const code = getErrorCode(error)
+  return /fetch failed|terminated|socket|connection|network/i.test(message)
+    || ['UND_ERR_SOCKET', 'ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE'].includes(code)
+}
+
+async function withDisconnectRetry<T>(operation: () => Promise<T>) {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= UPSTREAM_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if (!isDisconnectError(error) || attempt >= UPSTREAM_FETCH_ATTEMPTS) throw error
+      const delayMs = UPSTREAM_RETRY_DELAYS_MS[attempt - 1] ?? 1000
+      if (delayMs > 0) await delay(delayMs)
+    }
+  }
+  throw lastError
 }
 
 function pickActualParams(source: unknown): Partial<TaskParams> {
@@ -466,76 +507,76 @@ async function callImagesApi(opts: {
     return mergeConcurrentResults(results)
   }
 
-  const prompt = opts.config.codexCompatible
-    ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${opts.prompt}`
-    : opts.prompt
+  const prompt = opts.prompt
   const isEdit = opts.inputImageDataUrls.length > 0
   const mime = opts.config.codexCompatible ? 'image/png' : MIME_MAP[opts.params.output_format] || 'image/png'
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.config.timeout * 1000)
 
   try {
-    let response: Response
-    if (isEdit) {
-      const formData = new FormData()
-      formData.append('model', opts.config.model)
-      formData.append('prompt', prompt)
-      if (!opts.config.codexCompatible) {
-        formData.append('size', opts.params.size)
-        formData.append('output_format', opts.params.output_format)
-        formData.append('moderation', opts.params.moderation)
-        formData.append('quality', opts.params.quality)
-      }
-      if (!opts.config.codexCompatible && opts.params.output_format !== 'png' && opts.params.output_compression != null) {
-        formData.append('output_compression', String(opts.params.output_compression))
-      }
-      if (opts.params.n > 1) formData.append('n', String(opts.params.n))
+    const payload = await withDisconnectRetry(async () => {
+      let response: Response
+      if (isEdit) {
+        const formData = new FormData()
+        formData.append('model', opts.config.model)
+        formData.append('prompt', prompt)
+        if (!opts.config.codexCompatible) {
+          formData.append('size', opts.params.size)
+          formData.append('output_format', opts.params.output_format)
+          formData.append('moderation', opts.params.moderation)
+          formData.append('quality', opts.params.quality)
+        }
+        if (!opts.config.codexCompatible && opts.params.output_format !== 'png' && opts.params.output_compression != null) {
+          formData.append('output_compression', String(opts.params.output_compression))
+        }
+        if (opts.params.n > 1) formData.append('n', String(opts.params.n))
 
-      opts.inputImageDataUrls.forEach((dataUrl, index) => {
-        const blob = dataUrlToBlob(dataUrl)
-        formData.append('image[]', blob, `input-${index + 1}.${getBlobExtension(blob)}`)
-      })
-      if (opts.maskDataUrl) {
-        formData.append('mask', dataUrlToBlob(opts.maskDataUrl, 'image/png'), 'mask.png')
+        opts.inputImageDataUrls.forEach((dataUrl, index) => {
+          const blob = dataUrlToBlob(dataUrl)
+          formData.append('image[]', blob, `input-${index + 1}.${getBlobExtension(blob)}`)
+        })
+        if (opts.maskDataUrl) {
+          formData.append('mask', dataUrlToBlob(opts.maskDataUrl, 'image/png'), 'mask.png')
+        }
+
+        response = await fetch(buildApiUrl(opts.config.baseUrl, 'images/edits'), {
+          method: 'POST',
+          headers: createRequestHeaders(opts.config),
+          body: formData,
+          signal: controller.signal,
+          cache: 'no-store',
+        })
+      } else {
+        const body: Record<string, unknown> = {
+          model: opts.config.model,
+          prompt,
+        }
+        if (!opts.config.codexCompatible) {
+          body.size = opts.params.size
+          body.output_format = opts.params.output_format
+          body.moderation = opts.params.moderation
+          body.quality = opts.params.quality
+        }
+        if (!opts.config.codexCompatible && opts.params.output_format !== 'png' && opts.params.output_compression != null) {
+          body.output_compression = opts.params.output_compression
+        }
+        if (opts.params.n > 1) body.n = opts.params.n
+
+        response = await fetch(buildApiUrl(opts.config.baseUrl, 'images/generations'), {
+          method: 'POST',
+          headers: {
+            ...createRequestHeaders(opts.config),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+          cache: 'no-store',
+        })
       }
 
-      response = await fetch(buildApiUrl(opts.config.baseUrl, 'images/edits'), {
-        method: 'POST',
-        headers: createRequestHeaders(opts.config),
-        body: formData,
-        signal: controller.signal,
-        cache: 'no-store',
-      })
-    } else {
-      const body: Record<string, unknown> = {
-        model: opts.config.model,
-        prompt,
-      }
-      if (!opts.config.codexCompatible) {
-        body.size = opts.params.size
-        body.output_format = opts.params.output_format
-        body.moderation = opts.params.moderation
-        body.quality = opts.params.quality
-      }
-      if (!opts.config.codexCompatible && opts.params.output_format !== 'png' && opts.params.output_compression != null) {
-        body.output_compression = opts.params.output_compression
-      }
-      if (opts.params.n > 1) body.n = opts.params.n
-
-      response = await fetch(buildApiUrl(opts.config.baseUrl, 'images/generations'), {
-        method: 'POST',
-        headers: {
-          ...createRequestHeaders(opts.config),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-        cache: 'no-store',
-      })
-    }
-
-    if (!response.ok) throw new Error(await getApiErrorMessage(response))
-    const payload = await response.json() as ImageApiResponse
+      if (!response.ok) throw new Error(await getApiErrorMessage(response))
+      return response.json() as Promise<ImageApiResponse>
+    })
     const data = payload.data
     if (!Array.isArray(data) || !data.length) throw new Error('接口未返回图片数据')
 
@@ -584,23 +625,26 @@ async function callResponsesImageApi(opts: {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.config.timeout * 1000)
   try {
-    const response = await fetch(buildApiUrl(opts.config.baseUrl, 'responses'), {
-      method: 'POST',
-      headers: {
-        ...createRequestHeaders(opts.config),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: opts.config.model,
-        input: createResponsesInput(opts.prompt, opts.inputImageDataUrls),
-        tools: [createResponsesImageTool(opts.params, opts.inputImageDataUrls.length > 0, opts.config, opts.maskDataUrl)],
-        tool_choice: 'required',
-      }),
-      signal: controller.signal,
-      cache: 'no-store',
+    const payload = await withDisconnectRetry(async () => {
+      const response = await fetch(buildApiUrl(opts.config.baseUrl, 'responses'), {
+        method: 'POST',
+        headers: {
+          ...createRequestHeaders(opts.config),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: opts.config.model,
+          input: createResponsesInput(opts.prompt, opts.inputImageDataUrls),
+          tools: [createResponsesImageTool(opts.params, opts.inputImageDataUrls.length > 0, opts.config, opts.maskDataUrl)],
+          tool_choice: 'required',
+        }),
+        signal: controller.signal,
+        cache: 'no-store',
+      })
+      if (!response.ok) throw new Error(await getApiErrorMessage(response))
+      return response.json() as Promise<ResponsesApiResponse>
     })
-    if (!response.ok) throw new Error(await getApiErrorMessage(response))
-    const imageResults = parseResponsesImageResults(await response.json() as ResponsesApiResponse, mime)
+    const imageResults = parseResponsesImageResults(payload, mime)
     const actualParams = mergeActualParams(imageResults[0]?.actualParams, { n: imageResults.length })
     return {
       images: imageResults.map((result) => result.image),
