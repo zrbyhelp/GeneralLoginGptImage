@@ -73,6 +73,11 @@ export default defineNuxtConfig({
       autoprefixer: {},
     },
   },
+  nitro: {
+    externals: {
+      external: ['better-sqlite3'],
+    },
+  },
   vite: {
     vueJsx: {
       include: [/\.vue-jsx\.[jt]sx$/],
