@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { stat, writeFile } from 'node:fs/promises'
 import { gunzipSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,16 +11,20 @@ import { updateAdminSettings } from './admin-settings'
 import {
   cleanupOldBackups,
   createBackupNowForTests,
+  deleteBackup,
   getBackupS3Config,
   getBackupSchedule,
   getPrivateS3Config,
+  importBackupRecordsFromR2,
   listBackupRecords,
+  restoreUploadedBackupNow,
   restoreBackupNowForTests,
   setBackupObjectStoreFactoryForTests,
   stopBackupSchedule,
   updateBackupS3Config,
   updateBackupSchedule,
   type BackupObjectStore,
+  type BackupObjectInfo,
   type BackupS3Config,
 } from './backup'
 import { closeDbForTests, getDb, setDatabasePathForTests } from './db'
@@ -38,11 +42,18 @@ const Database = require('better-sqlite3') as new (filename: string, options?: {
 
 class MemoryObjectStore implements BackupObjectStore {
   objects = new Map<string, Buffer>()
+  objectInfo = new Map<string, BackupObjectInfo>()
+  deletedKeys: string[] = []
   headBucketCalls = 0
 
   async uploadObject(key: string, filePath: string) {
     const bytes = readFileSync(filePath)
     this.objects.set(key, bytes)
+    this.objectInfo.set(key, {
+      key,
+      sizeBytes: bytes.byteLength,
+      lastModified: new Date(),
+    })
     return bytes.byteLength
   }
 
@@ -54,7 +65,9 @@ class MemoryObjectStore implements BackupObjectStore {
   }
 
   async deleteObject(key: string) {
+    this.deletedKeys.push(key)
     this.objects.delete(key)
+    this.objectInfo.delete(key)
   }
 
   async getDownloadUrl(key: string) {
@@ -63,6 +76,10 @@ class MemoryObjectStore implements BackupObjectStore {
 
   async headBucket() {
     this.headBucketCalls += 1
+  }
+
+  async listObjects(prefix: string) {
+    return Array.from(this.objectInfo.values()).filter((object) => object.key.startsWith(prefix))
   }
 }
 
@@ -304,5 +321,124 @@ describe('server backup service', () => {
     expect(records[0].id).toBe(second.id)
     expect(objectStore.objects.has(first.s3Key)).toBe(false)
     expect(objectStore.objects.has(second.s3Key)).toBe(true)
+  })
+
+  it('imports valid R2 backup objects and updates duplicate records by key', async () => {
+    seedServerData()
+    const backup = await createBackupNowForTests('manual', 14)
+    const bytes = objectStore.objects.get(backup.s3Key) as Buffer
+    const importKey = 'backups/2026/06/29/gpt-image-playground-sqlite-20260629_010203-imported.db.gz'
+    objectStore.objects.set(importKey, bytes)
+    objectStore.objectInfo.set(importKey, {
+      key: importKey,
+      sizeBytes: bytes.byteLength,
+      lastModified: new Date('2026-06-29T01:02:03.000Z'),
+    })
+    objectStore.objectInfo.set('backups/2026/06/29/not-a-backup.txt', {
+      key: 'backups/2026/06/29/not-a-backup.txt',
+      sizeBytes: 10,
+      lastModified: new Date('2026-06-29T01:02:04.000Z'),
+    })
+
+    getDb().prepare('DELETE FROM backup_records').run()
+    objectStore.objectInfo.delete(backup.s3Key)
+    const first = await importBackupRecordsFromR2()
+    expect(first.imported).toBe(1)
+    expect(first.updated).toBe(0)
+    expect(first.skipped).toBe(1)
+    expect(first.items[0]).toMatchObject({
+      s3Key: importKey,
+      triggeredBy: 'imported',
+      status: 'completed',
+      startedAt: '2026-06-29T01:02:03.000Z',
+    })
+
+    objectStore.objectInfo.set(importKey, {
+      key: importKey,
+      sizeBytes: bytes.byteLength + 7,
+      lastModified: new Date('2026-06-30T01:02:03.000Z'),
+    })
+    const second = await importBackupRecordsFromR2()
+    expect(second.imported).toBe(0)
+    expect(second.updated).toBe(1)
+    const records = await listBackupRecords()
+    expect(records.filter((record) => record.s3Key === importKey)).toHaveLength(1)
+    expect(records.find((record) => record.s3Key === importKey)?.sizeBytes).toBe(bytes.byteLength + 7)
+  })
+
+  it('restores an imported R2 record and deletes the imported object when deleted', async () => {
+    seedServerData()
+    const backup = await createBackupNowForTests('manual', 14)
+    const bytes = objectStore.objects.get(backup.s3Key) as Buffer
+    const importKey = 'backups/2026/06/29/gpt-image-playground-sqlite-20260629_020304-imported.db.gz'
+    objectStore.objects.set(importKey, bytes)
+    objectStore.objectInfo.set(importKey, {
+      key: importKey,
+      sizeBytes: bytes.byteLength,
+      lastModified: new Date('2026-06-29T02:03:04.000Z'),
+    })
+    getDb().prepare('DELETE FROM backup_records').run()
+    const imported = (await importBackupRecordsFromR2()).items.find((record) => record.s3Key === importKey)
+    expect(imported).toBeTruthy()
+
+    getDb().prepare('UPDATE user_points SET balance = ? WHERE user_id = ?').run(9, 'user-a')
+    const restored = await restoreBackupNowForTests(imported!.id, imported!.id)
+    expect(restored.restoreStatus).toBe('completed')
+    expect((getDb().prepare('SELECT balance FROM user_points WHERE user_id = ?').get('user-a') as { balance: number }).balance).toBe(321)
+    expect(objectStore.objects.has(importKey)).toBe(true)
+
+    await deleteBackup(imported!.id)
+    expect(objectStore.deletedKeys).toContain(importKey)
+  })
+
+  it('restores an uploaded gzip backup and creates a pre-restore safety backup', async () => {
+    seedServerData()
+    const original = await createBackupNowForTests('manual', 14)
+    const uploadPath = join(tempRoot, 'upload.db.gz')
+    await writeFile(uploadPath, objectStore.objects.get(original.s3Key) as Buffer)
+
+    getDb().prepare('UPDATE user_points SET balance = ? WHERE user_id = ?').run(2, 'user-a')
+    const result = await restoreUploadedBackupNow({
+      filePath: uploadPath,
+      fileName: 'gpt-image-playground-sqlite-upload.db.gz',
+      sizeBytes: (await stat(uploadPath)).size,
+      confirmationFileName: 'gpt-image-playground-sqlite-upload.db.gz',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.preRestoreBackupId).toMatch(/^bkp_/)
+    expect((getDb().prepare('SELECT balance FROM user_points WHERE user_id = ?').get('user-a') as { balance: number }).balance).toBe(321)
+    expect((await listBackupRecords()).some((record) => record.id === result.preRestoreBackupId && record.triggeredBy === 'pre_restore')).toBe(true)
+  })
+
+  it('rejects invalid uploaded backup requests without replacing the current database', async () => {
+    seedServerData()
+    const before = (getDb().prepare('SELECT balance FROM user_points WHERE user_id = ?').get('user-a') as { balance: number }).balance
+    const badPath = join(tempRoot, 'bad.db.gz')
+    await writeFile(badPath, Buffer.from('not gzip'))
+
+    await expect(restoreUploadedBackupNow({
+      filePath: badPath,
+      fileName: 'bad.txt',
+      sizeBytes: 8,
+      confirmationFileName: 'bad.txt',
+    })).rejects.toMatchObject({ statusCode: 400 })
+
+    await expect(restoreUploadedBackupNow({
+      filePath: badPath,
+      fileName: 'bad.db.gz',
+      sizeBytes: 8,
+      confirmationFileName: 'wrong.db.gz',
+    })).rejects.toMatchObject({ statusCode: 400 })
+
+    await expect(restoreUploadedBackupNow({
+      filePath: badPath,
+      fileName: 'bad.db.gz',
+      sizeBytes: 8,
+      confirmationFileName: 'bad.db.gz',
+    })).rejects.toBeTruthy()
+
+    const after = (getDb().prepare('SELECT balance FROM user_points WHERE user_id = ?').get('user-a') as { balance: number }).balance
+    expect(after).toBe(before)
   })
 })

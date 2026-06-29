@@ -1,7 +1,7 @@
 import { createReadStream, createWriteStream, mkdirSync } from 'node:fs'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createGunzip, createGzip } from 'node:zlib'
@@ -9,6 +9,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
@@ -16,12 +17,12 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import Database from 'better-sqlite3'
 import { createError } from 'h3'
 import cron from 'node-cron'
-import { generateId } from './crypto'
+import { generateId, sha256 } from './crypto'
 import { backupDatabaseTo, getDb, replaceDatabaseFile } from './db'
 
 type BackupStatus = 'running' | 'completed' | 'failed'
 type RestoreStatus = '' | 'running' | 'completed' | 'failed'
-type BackupTrigger = 'manual' | 'scheduled' | 'pre_restore'
+type BackupTrigger = 'manual' | 'scheduled' | 'pre_restore' | 'imported'
 
 export interface BackupS3Config {
   endpoint: string
@@ -66,6 +67,27 @@ export interface BackupObjectStore {
   deleteObject: (key: string) => Promise<void>
   getDownloadUrl: (key: string, expiresInSeconds: number) => Promise<string>
   headBucket: () => Promise<void>
+  listObjects: (prefix: string) => Promise<BackupObjectInfo[]>
+}
+
+export interface BackupObjectInfo {
+  key: string
+  sizeBytes: number
+  lastModified: Date | null
+}
+
+export interface ImportBackupRecordsResult {
+  imported: number
+  updated: number
+  skipped: number
+  items: BackupRecord[]
+}
+
+export interface RestoreUploadedBackupResult {
+  ok: true
+  fileName: string
+  sizeBytes: number
+  preRestoreBackupId: string
 }
 
 type BackupS3ConfigRow = {
@@ -128,6 +150,8 @@ const DEFAULT_RETAIN_DAYS = 14
 const DEFAULT_RETAIN_COUNT = 10
 const SQLITE_BACKUP_TYPE = 'sqlite'
 const DOWNLOAD_URL_TTL_SECONDS = 60 * 60
+const BACKUP_FILE_PREFIX = 'gpt-image-playground-sqlite-'
+const BACKUP_FILE_SUFFIX = '.db.gz'
 const CORE_TABLES = [
   'sessions',
   'admin_settings',
@@ -301,7 +325,7 @@ function formatTimestamp(date: Date) {
 
 function createBackupRecord(triggeredBy: BackupTrigger, expireDays = DEFAULT_RETAIN_DAYS, now = new Date(), config: BackupS3Config): BackupRecord {
   const id = generateId('bkp')
-  const fileName = `gpt-image-playground-sqlite-${formatTimestamp(now)}-${id}.db.gz`
+  const fileName = `${BACKUP_FILE_PREFIX}${formatTimestamp(now)}-${id}${BACKUP_FILE_SUFFIX}`
   return {
     id,
     status: 'running',
@@ -319,6 +343,32 @@ function createBackupRecord(triggeredBy: BackupTrigger, expireDays = DEFAULT_RET
     restoreError: null,
     restoredAt: null,
   }
+}
+
+function createImportedBackupRecord(object: BackupObjectInfo): BackupRecord {
+  const timestamp = object.lastModified?.toISOString() || new Date().toISOString()
+  return {
+    id: `bkp_imported_${sha256(object.key).slice(0, 24)}`,
+    status: 'completed',
+    backupType: SQLITE_BACKUP_TYPE,
+    fileName: basename(object.key),
+    s3Key: object.key,
+    sizeBytes: object.sizeBytes,
+    triggeredBy: 'imported',
+    progress: null,
+    errorMessage: null,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    expiresAt: null,
+    restoreStatus: '',
+    restoreError: null,
+    restoredAt: null,
+  }
+}
+
+function isImportableBackupObject(object: BackupObjectInfo) {
+  const fileName = basename(object.key)
+  return fileName.startsWith(BACKUP_FILE_PREFIX) && fileName.endsWith(BACKUP_FILE_SUFFIX)
 }
 
 function bodyToReadable(body: unknown): Readable {
@@ -389,6 +439,28 @@ class S3BackupObjectStore implements BackupObjectStore {
 
   async headBucket() {
     await this.client.send(new HeadBucketCommand({ Bucket: this.config.bucket }))
+  }
+
+  async listObjects(prefix: string) {
+    const objects: BackupObjectInfo[] = []
+    let continuationToken: string | undefined
+    do {
+      const response = await this.client.send(new ListObjectsV2Command({
+        Bucket: this.config.bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }))
+      for (const object of response.Contents || []) {
+        if (!object.Key) continue
+        objects.push({
+          key: object.Key,
+          sizeBytes: Number(object.Size) || 0,
+          lastModified: object.LastModified || null,
+        })
+      }
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined
+    } while (continuationToken)
+    return objects
   }
 }
 
@@ -552,18 +624,22 @@ async function createBackupNow(triggeredBy: BackupTrigger, expireDays = DEFAULT_
   }
 }
 
+async function restoreFromGzipFile(gzipPath: string, tempRoot: string) {
+  const restoredDbPath = join(tempRoot, 'restore.db')
+  const preRestoreRecord = await createBackupNow('pre_restore', DEFAULT_RETAIN_DAYS)
+  await gunzipFile(gzipPath, restoredDbPath)
+  validateRestoredDatabase(restoredDbPath)
+  replaceDatabaseFile(restoredDbPath)
+  saveBackupRecord(preRestoreRecord)
+  return preRestoreRecord
+}
+
 async function executeRestoreRecord(record: BackupRecord, store: BackupObjectStore) {
   const tempRoot = await mkdtemp(join(tmpdir(), 'gip-restore-'))
   const gzipPath = join(tempRoot, 'restore.db.gz')
-  const restoredDbPath = join(tempRoot, 'restore.db')
-  let preRestoreRecord: BackupRecord | null = null
   try {
-    preRestoreRecord = await createBackupNow('pre_restore', DEFAULT_RETAIN_DAYS)
     await store.downloadObject(record.s3Key, gzipPath)
-    await gunzipFile(gzipPath, restoredDbPath)
-    validateRestoredDatabase(restoredDbPath)
-    replaceDatabaseFile(restoredDbPath)
-    if (preRestoreRecord) saveBackupRecord(preRestoreRecord)
+    await restoreFromGzipFile(gzipPath, tempRoot)
 
     record.restoreStatus = 'completed'
     record.restoreError = null
@@ -799,6 +875,57 @@ export async function deleteBackup(id: string) {
   deleteBackupRecord(id)
 }
 
+export async function importBackupRecordsFromR2(): Promise<ImportBackupRecordsResult> {
+  const config = await getPrivateS3Config()
+  assertS3Configured(config)
+  const prefix = `${normalizePrefix(config.prefix)}/`
+  const objects = await createObjectStore(config).listObjects(prefix)
+  let imported = 0
+  let updated = 0
+  let skipped = 0
+  const items: BackupRecord[] = []
+
+  for (const object of objects) {
+    if (!isImportableBackupObject(object)) {
+      skipped += 1
+      continue
+    }
+
+    const next = createImportedBackupRecord(object)
+    const existingByKey = getDb().prepare('SELECT * FROM backup_records WHERE s3_key = ?').get(object.key) as BackupRecordRow | undefined
+    const existingById = getDb().prepare('SELECT * FROM backup_records WHERE id = ?').get(next.id) as BackupRecordRow | undefined
+    const existing = existingByKey || existingById
+
+    if (existing) {
+      const current = recordFromRow(existing)
+      saveBackupRecord({
+        ...current,
+        id: current.id || next.id,
+        status: 'completed',
+        backupType: SQLITE_BACKUP_TYPE,
+        fileName: next.fileName,
+        s3Key: next.s3Key,
+        sizeBytes: next.sizeBytes,
+        triggeredBy: current.triggeredBy || 'imported',
+        progress: null,
+        errorMessage: null,
+        startedAt: next.startedAt,
+        finishedAt: next.finishedAt,
+        expiresAt: current.expiresAt,
+      })
+      items.push(await getBackupRecord(current.id || next.id))
+      updated += 1
+      continue
+    }
+
+    saveBackupRecord(next)
+    items.push(next)
+    imported += 1
+  }
+
+  return { imported, updated, skipped, items }
+}
+
 export async function getBackupDownloadUrl(id: string) {
   const record = await getBackupRecord(id)
   if (record.status !== 'completed') {
@@ -835,6 +962,33 @@ export async function startRestoreBackup(id: string, confirmationId: string) {
     return record
   } finally {
     if (!launched) releaseRestoreSlot()
+  }
+}
+
+export async function restoreUploadedBackupNow(input: {
+  filePath: string
+  fileName: string
+  sizeBytes: number
+  confirmationFileName: string
+}): Promise<RestoreUploadedBackupResult> {
+  if (!input.fileName.endsWith(BACKUP_FILE_SUFFIX)) {
+    throw createError({ statusCode: 400, statusMessage: '只能上传 .db.gz 备份文件' })
+  }
+  if (input.confirmationFileName !== input.fileName) {
+    throw createError({ statusCode: 400, statusMessage: '备份文件名确认不匹配' })
+  }
+
+  acquireRestoreSlot()
+  try {
+    const preRestoreRecord = await restoreFromGzipFile(input.filePath, dirname(input.filePath))
+    return {
+      ok: true,
+      fileName: input.fileName,
+      sizeBytes: input.sizeBytes,
+      preRestoreBackupId: preRestoreRecord.id,
+    }
+  } finally {
+    releaseRestoreSlot()
   }
 }
 

@@ -46,7 +46,7 @@ type BackupRecord = {
   fileName: string
   s3Key: string
   sizeBytes: number
-  triggeredBy: 'manual' | 'scheduled' | 'pre_restore'
+  triggeredBy: 'manual' | 'scheduled' | 'pre_restore' | 'imported'
   progress: string | null
   errorMessage: string | null
   startedAt: string
@@ -251,6 +251,9 @@ export default function AdminAuditModal() {
   const [manualExpireDays, setManualExpireDays] = useState(14)
   const [restoringBackupId, setRestoringBackupId] = useState('')
   const [deletingBackupId, setDeletingBackupId] = useState('')
+  const [importingR2Backups, setImportingR2Backups] = useState(false)
+  const [uploadRestoreFile, setUploadRestoreFile] = useState<File | null>(null)
+  const [restoringUpload, setRestoringUpload] = useState(false)
 
   useCloseOnEscape(showAdminAudit, () => setShowAdminAudit(false))
 
@@ -416,6 +419,21 @@ export default function AdminAuditModal() {
     }
   }
 
+  async function importR2Backups() {
+    setImportingR2Backups(true)
+    try {
+      const payload = await fetchJson<{ imported: number; updated: number; skipped: number; items: BackupRecord[] }>('/api/admin/backups/import-r2', {
+        method: 'POST',
+      })
+      await loadBackupRecords(true)
+      showToast(`扫描完成：导入 ${payload.imported}，更新 ${payload.updated}，跳过 ${payload.skipped}`, 'success')
+    } catch (error) {
+      showToast(`扫描 R2 失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    } finally {
+      setImportingR2Backups(false)
+    }
+  }
+
   async function downloadBackup(id: string) {
     try {
       const payload = await fetchJson<{ url: string }>(`/api/admin/backups/${encodeURIComponent(id)}/download-url`)
@@ -443,6 +461,39 @@ export default function AdminAuditModal() {
     } catch (error) {
       setRestoringBackupId('')
       showToast(`恢复失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
+  }
+
+  async function restoreUploadedBackup() {
+    if (!uploadRestoreFile) {
+      showToast('请选择 .db.gz 备份文件', 'error')
+      return
+    }
+    if (!uploadRestoreFile.name.endsWith('.db.gz')) {
+      showToast('只能上传 .db.gz 备份文件', 'error')
+      return
+    }
+    const confirmationFileName = window.prompt(`输入完整文件名以确认恢复：${uploadRestoreFile.name}`)
+    if (confirmationFileName !== uploadRestoreFile.name) {
+      if (confirmationFileName) showToast('备份文件名确认不匹配', 'error')
+      return
+    }
+
+    setRestoringUpload(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadRestoreFile)
+      formData.append('confirmationFileName', confirmationFileName)
+      await fetchJson<{ ok: true; fileName: string; sizeBytes: number; preRestoreBackupId: string }>('/api/admin/backups/restore-upload', {
+        method: 'POST',
+        body: formData,
+      })
+      showToast('上传备份已恢复，页面将刷新', 'success')
+      window.setTimeout(() => window.location.reload(), 800)
+    } catch (error) {
+      showToast(`上传恢复失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    } finally {
+      setRestoringUpload(false)
     }
   }
 
@@ -1065,6 +1116,9 @@ export default function AdminAuditModal() {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <h5 className="text-xs font-medium text-gray-700 dark:text-gray-200">备份记录</h5>
                   <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => void importR2Backups()} disabled={importingR2Backups} className="rounded-lg border border-gray-200 bg-white/70 px-2.5 py-1 text-xs text-gray-600 transition hover:bg-white disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
+                      {importingR2Backups ? '扫描中...' : '扫描 R2'}
+                    </button>
                     <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                       过期天数
                       <input value={manualExpireDays} onChange={(event) => setManualExpireDays(Math.max(0, Number(event.target.value) || 0))} type="number" min={0} className="w-20 rounded-lg border border-gray-200 bg-white/70 px-2 py-1 text-xs dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-100" />
@@ -1073,6 +1127,13 @@ export default function AdminAuditModal() {
                       {creatingBackup ? '备份中...' : '立即备份'}
                     </button>
                   </div>
+                </div>
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200/70 bg-amber-50/60 px-3 py-2 dark:border-amber-400/20 dark:bg-amber-400/10">
+                  <span className="text-xs text-amber-700 dark:text-amber-200">上传备份文件恢复</span>
+                  <input type="file" accept=".db.gz,application/gzip" onChange={(event) => setUploadRestoreFile(event.target.files?.[0] || null)} className="max-w-full text-xs text-gray-600 file:mr-2 file:rounded-lg file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs file:text-gray-600 dark:text-gray-300 dark:file:bg-white/[0.08] dark:file:text-gray-200" />
+                  <button type="button" onClick={() => void restoreUploadedBackup()} disabled={!uploadRestoreFile || restoringUpload || Boolean(restoringBackupId)} className="rounded-lg bg-amber-500 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-amber-600 disabled:opacity-50">
+                    {restoringUpload ? '恢复中...' : '上传恢复'}
+                  </button>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[820px] text-xs">
@@ -1098,7 +1159,7 @@ export default function AdminAuditModal() {
                           </td>
                           <td className="py-2 pr-3 max-w-52 truncate text-gray-500 dark:text-gray-400" title={record.s3Key}>{record.fileName}</td>
                           <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">{formatBackupSize(record.sizeBytes)}</td>
-                          <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">{record.triggeredBy === 'scheduled' ? '自动' : record.triggeredBy === 'pre_restore' ? '恢复前' : '手动'}</td>
+                          <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">{record.triggeredBy === 'scheduled' ? '自动' : record.triggeredBy === 'pre_restore' ? '恢复前' : record.triggeredBy === 'imported' ? '导入' : '手动'}</td>
                           <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">{formatBackupDate(record.startedAt)}</td>
                           <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">
                             {record.restoreStatus === 'running' ? '恢复中' : record.restoreStatus === 'completed' ? `完成 ${formatBackupDate(record.restoredAt)}` : record.restoreStatus === 'failed' ? (record.restoreError || '失败') : '-'}
