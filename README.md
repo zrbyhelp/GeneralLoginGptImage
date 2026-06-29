@@ -159,6 +159,14 @@ services:
 - 按最新图集接口文档，上传时会同步当前统一登录用户字段：`userId`、`userAccount`、`userEmail`、`userUsername`、`userName`，便于图集详情展示用户信息。
 - 图集上传失败不会影响本次生成结果，页面只会提示“图集上传失败”；隐私模式会完全跳过图集上传。
 
+**S3/R2 数据库备份：**
+
+- 管理员可在“管理设置 → 数据备份”中配置 S3 兼容存储（如 Cloudflare R2）、测试连接、创建手动备份、启用自动备份、下载/删除/恢复备份。
+- 备份内容是服务端 SQLite 全库快照，包含后台模型配置与 API Key、登录会话、用户积分、兑换码、积分流水、用量和审计元数据；不包含浏览器 IndexedDB 本地历史记录，也不包含服务端生成图片文件。
+- 自动备份默认关闭。可通过 `NUXT_BACKUP_SCHEDULE_ENABLED=true` 启用，默认计划为 `NUXT_BACKUP_SCHEDULE_CRON="0 2 * * *"`，时区 `NUXT_BACKUP_SCHEDULE_TIMEZONE=Asia/Shanghai`。
+- S3/R2 可用环境变量预置：`NUXT_BACKUP_S3_ENDPOINT`、`NUXT_BACKUP_S3_REGION`、`NUXT_BACKUP_S3_BUCKET`、`NUXT_BACKUP_S3_ACCESS_KEY_ID`、`NUXT_BACKUP_S3_SECRET_ACCESS_KEY`、`NUXT_BACKUP_S3_PREFIX`、`NUXT_BACKUP_S3_FORCE_PATH_STYLE`。
+- 恢复备份时需要输入目标备份 ID 二次确认；系统会先自动创建一份 `pre_restore` 当前数据库安全备份，再替换数据库文件并保留备份中的登录会话。
+
 ```bash
 npm install
 npm run dev

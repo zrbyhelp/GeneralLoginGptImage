@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { getAppDataRoot, resolveConfiguredPath } from './file-store'
@@ -15,6 +15,7 @@ type SqliteDatabase = {
   prepare: (source: string) => Statement
   pragma: (source: string) => unknown
   transaction: <T extends (...params: never[]) => unknown>(fn: T) => T
+  backup: (destinationFile: string, options?: { progress?: (info: { totalPages: number; remainingPages: number }) => number }) => Promise<{ totalPages: number; remainingPages: number }>
   close: () => SqliteDatabase
 }
 
@@ -181,6 +182,49 @@ function initSchema(db: SqliteDatabase) {
 
     CREATE INDEX IF NOT EXISTS generation_audit_images_audit_id_idx
       ON generation_audit_images (audit_id);
+
+    CREATE TABLE IF NOT EXISTS backup_s3_config (
+      id TEXT PRIMARY KEY,
+      endpoint TEXT NOT NULL,
+      region TEXT NOT NULL,
+      bucket TEXT NOT NULL,
+      access_key_id TEXT NOT NULL,
+      secret_access_key TEXT NOT NULL,
+      prefix TEXT NOT NULL,
+      force_path_style INTEGER NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_schedule (
+      id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL,
+      cron_expr TEXT NOT NULL,
+      timezone TEXT NOT NULL,
+      retain_days INTEGER NOT NULL,
+      retain_count INTEGER NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_records (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      backup_type TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      s3_key TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      triggered_by TEXT NOT NULL,
+      progress TEXT,
+      error_message TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      expires_at TEXT,
+      restore_status TEXT,
+      restore_error TEXT,
+      restored_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS backup_records_started_at_idx
+      ON backup_records (started_at);
   `)
 
   const auditColumns = new Set(
@@ -277,4 +321,22 @@ export function closeDbForTests() {
 export function setDatabasePathForTests(dbPath: string | null) {
   closeDbForTests()
   testPath = dbPath
+}
+
+export async function backupDatabaseTo(destinationFile: string) {
+  const db = getDb()
+  mkdirSync(dirname(destinationFile), { recursive: true })
+  await db.backup(destinationFile)
+}
+
+export function replaceDatabaseFile(sourceFile: string) {
+  const dbPath = getDatabasePath()
+  closeDbForTests()
+  mkdirSync(dirname(dbPath), { recursive: true })
+  rmSync(`${dbPath}-wal`, { force: true })
+  rmSync(`${dbPath}-shm`, { force: true })
+  rmSync(dbPath, { force: true })
+  copyFileSync(sourceFile, dbPath)
+  rmSync(sourceFile, { force: true })
+  getDb()
 }
