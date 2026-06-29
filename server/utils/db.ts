@@ -1,6 +1,6 @@
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import Database from 'better-sqlite3'
 import { getAppDataRoot, resolveConfiguredPath } from './file-store'
 
 type Statement = {
@@ -21,8 +21,7 @@ type SqliteDatabase = {
 
 type DatabaseConstructor = new (filename: string) => SqliteDatabase
 
-const require = createRequire(import.meta.url)
-const Database = require('better-sqlite3') as DatabaseConstructor
+const SqliteDatabase = Database as unknown as DatabaseConstructor
 
 let activeDb: SqliteDatabase | null = null
 let activePath: string | null = null
@@ -302,7 +301,7 @@ export function getDb() {
   if (activeDb?.open) activeDb.close()
 
   mkdirSync(dirname(dbPath), { recursive: true })
-  const db = new Database(dbPath)
+  const db = new SqliteDatabase(dbPath)
   db.pragma('foreign_keys = ON')
   db.pragma('journal_mode = WAL')
   initSchema(db)

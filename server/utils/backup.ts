@@ -1,6 +1,5 @@
 import { createReadStream, createWriteStream, mkdirSync } from 'node:fs'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -14,6 +13,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import Database from 'better-sqlite3'
 import { createError } from 'h3'
 import cron from 'node-cron'
 import { generateId } from './crypto'
@@ -117,8 +117,10 @@ type ValidationDatabase = {
   close: () => void
 }
 
-const require = createRequire(import.meta.url)
-const Database = require('better-sqlite3') as new (filename: string, options?: { readonly?: boolean; fileMustExist?: boolean }) => ValidationDatabase
+const ValidationSqliteDatabase = Database as unknown as new (
+  filename: string,
+  options?: { readonly?: boolean; fileMustExist?: boolean },
+) => ValidationDatabase
 
 const DEFAULT_BACKUP_CRON = '0 2 * * *'
 const DEFAULT_BACKUP_TIMEZONE = 'Asia/Shanghai'
@@ -403,7 +405,7 @@ async function gunzipFile(sourcePath: string, destinationPath: string) {
 }
 
 function validateRestoredDatabase(filePath: string) {
-  const db = new Database(filePath, { readonly: true, fileMustExist: true })
+  const db = new ValidationSqliteDatabase(filePath, { readonly: true, fileMustExist: true })
   try {
     const integrity = db.pragma('integrity_check', { simple: true })
     if (integrity !== 'ok') {
