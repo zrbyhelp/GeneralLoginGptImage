@@ -22,7 +22,8 @@ import {
   type GenerationAuditImage,
 } from './audits'
 import { setDatabasePathForTests } from './db'
-import { countRecentGeneratedImages, recordGenerationUsage } from './generation-usage'
+import { countRecentGeneratedImages, countTotalGeneratedImages, recordGenerationUsage } from './generation-usage'
+import { subscribeToGenerationTotal } from './generation-total-events'
 import { getModelHealthById, recordModelGenerationHealth } from './model-health'
 
 type TestDatabase = {
@@ -118,12 +119,20 @@ describe('SQLite-backed server storage', () => {
   })
 
   it('tracks generation usage without prompt or image file metadata', async () => {
+    const publishedTotals: number[] = []
+    const unsubscribe = subscribeToGenerationTotal((total) => publishedTotals.push(total))
+
+    expect(countTotalGeneratedImages()).toBe(0)
     await recordGenerationUsage({ userId: 'user-usage', imageCount: 2, privacyMode: false })
     await recordGenerationUsage({ userId: 'user-usage', imageCount: 3, privacyMode: true })
     await recordGenerationUsage({ userId: 'user-other', imageCount: 5, privacyMode: true })
+    await recordGenerationUsage({ userId: 'ignored-zero', imageCount: 0, privacyMode: false })
+    unsubscribe()
 
     expect(await countRecentGeneratedImages('user-usage', false)).toBe(2)
     expect(await countRecentGeneratedImages('user-usage', true)).toBe(3)
+    expect(countTotalGeneratedImages()).toBe(10)
+    expect(publishedTotals).toEqual([2, 5, 10])
 
     const db = new Database(join(tempRoot, 'app.db')) as unknown as {
       prepare: (source: string) => { all: () => Array<Record<string, unknown>> }
@@ -133,6 +142,27 @@ describe('SQLite-backed server storage', () => {
     db.close()
 
     expect(usageColumns).toEqual(['id', 'user_id', 'image_count', 'privacy_mode', 'created_at'])
+  })
+
+  it('keeps generation usage writes successful when total subscribers fail', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const unsubscribe = subscribeToGenerationTotal(() => {
+      throw new Error('subscriber unavailable')
+    })
+
+    await expect(recordGenerationUsage({
+      userId: 'user-telemetry-failure',
+      imageCount: 2,
+      privacyMode: false,
+    })).resolves.toMatchObject({ imageCount: 2 })
+
+    unsubscribe()
+    expect(countTotalGeneratedImages()).toBe(2)
+    expect(consoleError).toHaveBeenCalledWith(
+      '[generation-total] subscriber failed:',
+      expect.objectContaining({ message: 'subscriber unavailable' }),
+    )
+    consoleError.mockRestore()
   })
 
   it('aggregates recent anonymous model health and clears expired events', async () => {

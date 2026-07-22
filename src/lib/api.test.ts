@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
-import { callImageApi } from './api'
+import { callImageApi, uploadImagesToGallery } from './api'
 
 async function flushPromises(times = 4) {
   for (let i = 0; i < times; i += 1) {
@@ -240,5 +240,49 @@ describe('callImageApi', () => {
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
     })).rejects.toThrow('每小时生成次数已达上限')
+  })
+})
+
+describe('uploadImagesToGallery', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('posts only task content and model metadata to the server proxy', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    await uploadImagesToGallery({
+      prompt: 'prompt',
+      params: DEFAULT_PARAMS,
+      modelId: 'model-a',
+      apiProvider: 'openai',
+      apiModel: 'gpt-image-2',
+      imageDataUrls: ['data:image/png;base64,b3V0'],
+      referenceImageDataUrls: ['data:image/png;base64,cmVm'],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(fetchMock).toHaveBeenCalledWith('/api/images/gallery-upload', expect.objectContaining({
+      method: 'POST',
+      cache: 'no-store',
+    }))
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      modelId: 'model-a',
+      imageDataUrls: ['data:image/png;base64,b3V0'],
+      referenceImageDataUrls: ['data:image/png;base64,cmVm'],
+    })
+  })
+
+  it('surfaces server upload errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ statusMessage: '图集服务不可用' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    await expect(uploadImagesToGallery({
+      prompt: 'prompt',
+      params: DEFAULT_PARAMS,
+      imageDataUrls: ['data:image/png;base64,b3V0'],
+      referenceImageDataUrls: [],
+    })).rejects.toThrow('图集服务不可用')
   })
 })

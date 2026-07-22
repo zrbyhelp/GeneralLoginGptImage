@@ -1,5 +1,6 @@
 import { generateId } from './crypto'
 import { getDb } from './db'
+import { publishGenerationTotal } from './generation-total-events'
 
 export async function recordGenerationUsage(input: {
   userId: string
@@ -34,7 +35,24 @@ export async function recordGenerationUsage(input: {
     )
   `).run(record)
 
+  try {
+    publishGenerationTotal(countTotalGeneratedImages())
+  } catch (error) {
+    console.error('[generation-total] failed to publish usage update:', error)
+  }
+
   return record
+}
+
+export function countTotalGeneratedImages() {
+  const row = getDb()
+    .prepare(`
+      SELECT COALESCE(SUM(image_count), 0) AS total
+      FROM generation_usage
+    `)
+    .get() as { total?: number | null } | undefined
+
+  return Math.max(0, Number(row?.total ?? 0))
 }
 
 export async function countRecentGeneratedImages(userId: string, privacyMode: boolean, now = Date.now()) {

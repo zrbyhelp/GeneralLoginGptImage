@@ -25,7 +25,7 @@ import {
   clearImages,
   storeImage,
 } from './lib/db'
-import { callImageApi, ImageApiError, pollImageGenerationJob } from './lib/api'
+import { callImageApi, ImageApiError, pollImageGenerationJob, uploadImagesToGallery } from './lib/api'
 import type { CallApiResult, ImageGenerationJobStatus } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult, getFalQueueStatus } from './lib/falAiImageApi'
 import { validateMaskMatchesImage } from './lib/canvasImage'
@@ -84,6 +84,9 @@ function sanitizeClientSettings(input: Partial<AppSettings> | unknown): AppSetti
 // ===== Store 类型 =====
 
 interface AppState {
+  siteGeneratedImageCount: number | null
+  setSiteGeneratedImageCount: (count: number) => void
+
   auth: {
     loading: boolean
     authenticated: boolean
@@ -150,6 +153,8 @@ interface AppState {
   // 任务列表
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
+  galleryUploadingTaskIds: string[]
+  setTaskGalleryUploading: (taskId: string, uploading: boolean) => void
 
   // 搜索和筛选
   searchQuery: string
@@ -222,6 +227,10 @@ export const useStore = create<AppState>()(
           modelHealthById: {},
         },
       },
+      siteGeneratedImageCount: null,
+      setSiteGeneratedImageCount: (count) => set({
+        siteGeneratedImageCount: Math.max(0, Math.floor(Number(count) || 0)),
+      }),
       setAuth: (auth) => set((state) => {
         const nextAuth = { ...state.auth, ...auth }
         const models = nextAuth.generationDefaults.models
@@ -324,6 +333,14 @@ export const useStore = create<AppState>()(
       // Tasks
       tasks: [],
       setTasks: (tasks) => set({ tasks }),
+      galleryUploadingTaskIds: [],
+      setTaskGalleryUploading: (taskId, uploading) => set((state) => ({
+        galleryUploadingTaskIds: uploading
+          ? state.galleryUploadingTaskIds.includes(taskId)
+            ? state.galleryUploadingTaskIds
+            : [...state.galleryUploadingTaskIds, taskId]
+          : state.galleryUploadingTaskIds.filter((id) => id !== taskId),
+      })),
 
       // Search & Filter
       searchQuery: '',
@@ -417,6 +434,61 @@ export async function refreshModelHealth() {
   } catch {
     // Keep the latest known health state when a refresh cannot be completed.
   }
+}
+
+async function loadTaskImages(imageIds: string[], label: string) {
+  const images = await Promise.all(imageIds.map((id) => ensureImageCached(id)))
+  const missing = images.findIndex((image) => !image)
+  if (missing >= 0) throw new Error(`${label}第 ${missing + 1} 张已不存在`)
+  return images as string[]
+}
+
+async function uploadTaskToGallery(taskId: string) {
+  const state = useStore.getState()
+  const task = state.tasks.find((item) => item.id === taskId)
+  if (!task || task.galleryUploadedAt || state.galleryUploadingTaskIds.includes(taskId)) return
+  if (task.status !== 'done' || !task.outputImages.length) {
+    state.showToast('当前任务没有可上传的生成图片', 'error')
+    return
+  }
+
+  state.setTaskGalleryUploading(taskId, true)
+  try {
+    const [imageDataUrls, referenceImageDataUrls] = await Promise.all([
+      loadTaskImages(task.outputImages, '生成图片'),
+      loadTaskImages(task.inputImageIds, '参考图'),
+    ])
+    await uploadImagesToGallery({
+      prompt: task.prompt,
+      params: task.params,
+      modelId: task.modelId,
+      apiProvider: task.apiProvider,
+      apiModel: task.apiModel,
+      imageDataUrls,
+      referenceImageDataUrls,
+    })
+    updateTaskInStore(taskId, { galleryUploadedAt: Date.now() })
+    useStore.getState().showToast(`已上传 ${imageDataUrls.length} 张图片到图集`, 'success')
+  } catch (error) {
+    useStore.getState().showToast(`上传图集失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+  } finally {
+    useStore.getState().setTaskGalleryUploading(taskId, false)
+  }
+}
+
+export function requestTaskGalleryUpload(task: TaskRecord) {
+  if (task.galleryUploadedAt || task.status !== 'done' || !task.outputImages.length) return
+  useStore.getState().setConfirmDialog({
+    title: '上传到图集？',
+    message: `将把该任务的 ${task.outputImages.length} 张生成图片、${task.inputImageIds.length} 张参考图、提示词和当前账号信息上传到第三方图集。上传成功后不可重复上传，是否继续？`,
+    confirmText: '确认上传',
+    icon: 'info',
+    tone: 'warning',
+    messageAlign: 'left',
+    action: () => {
+      void uploadTaskToGallery(task.id)
+    },
+  })
 }
 
 // ===== Actions =====
@@ -767,6 +839,9 @@ async function finishTaskWithResult(
     apiModel: result.apiModel ?? task.apiModel,
     apiCodexCompatible: result.apiCodexCompatible ?? task.apiCodexCompatible,
     uploadToGallery: result.uploadToGallery ?? task.uploadToGallery,
+    galleryUploadedAt: result.uploadToGallery === true && result.galleryUploadError == null
+      ? Date.now()
+      : task.galleryUploadedAt,
     privacyMode: result.privacyMode ?? task.privacyMode,
     chargedPoints: result.chargedPoints,
     refundedPoints: result.refundedPoints,

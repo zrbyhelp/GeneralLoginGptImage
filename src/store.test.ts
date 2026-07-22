@@ -3,7 +3,7 @@ import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/apiProfiles'
 import { DEFAULT_OPENAI_TIERED_PRICING_RULES } from './lib/pricing'
 import type { TaskRecord } from './types'
-import { editOutputs, markInterruptedOpenAIRunningTasks, submitTask, useStore } from './store'
+import { editOutputs, markInterruptedOpenAIRunningTasks, requestTaskGalleryUpload, submitTask, useStore } from './store'
 
 const dbMocks = vi.hoisted(() => ({
   getAllTasks: vi.fn(),
@@ -21,6 +21,7 @@ const dbMocks = vi.hoisted(() => ({
 const apiMocks = vi.hoisted(() => ({
   callImageApi: vi.fn(),
   pollImageGenerationJob: vi.fn(),
+  uploadImagesToGallery: vi.fn(),
   ImageApiError: class ImageApiError extends Error {
     statusCode: number
     data: unknown
@@ -525,5 +526,128 @@ describe('announcement dismissal state', () => {
     useStore.getState().dismissAnnouncement('')
 
     expect(useStore.getState().dismissedAnnouncementIds).toEqual(['announcement-a'])
+  })
+})
+
+describe('task gallery upload', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    dbMocks.putTask.mockResolvedValue('task-key')
+    dbMocks.getImage.mockImplementation(async (id: string) => ({
+      id,
+      dataUrl: `data:image/png;base64,${id}`,
+    }))
+    apiMocks.uploadImagesToGallery.mockResolvedValue({ ok: true })
+    useStore.setState({
+      tasks: [task({
+        id: 'gallery-task',
+        prompt: 'gallery prompt',
+        modelId: testModel.id,
+        apiProvider: 'openai',
+        apiModel: 'gpt-image-2',
+        inputImageIds: ['reference-a', 'reference-b'],
+        outputImages: ['output-a', 'output-b'],
+      })],
+      galleryUploadingTaskIds: [],
+      toast: null,
+      confirmDialog: null,
+      showToast: vi.fn(),
+      setConfirmDialog: vi.fn(),
+    })
+  })
+
+  it('marks a task uploaded when automatic gallery upload succeeds', async () => {
+    apiMocks.callImageApi.mockResolvedValue({
+      images: ['data:image/png;base64,output'],
+      uploadToGallery: true,
+      privacyMode: false,
+      galleryUploadError: null,
+    })
+    useStore.setState({
+      tasks: [],
+      prompt: 'prompt',
+      selectedModelId: testModel.id,
+      inputImages: [],
+      maskDraft: null,
+      params: { ...DEFAULT_PARAMS },
+      uploadToGallery: true,
+    })
+
+    await submitTask({ confirmed: true })
+    await flushPromises()
+
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      status: 'done',
+      uploadToGallery: true,
+      galleryUploadedAt: expect.any(Number),
+    })
+  })
+
+  it('keeps manual gallery upload available when automatic upload fails', async () => {
+    apiMocks.callImageApi.mockResolvedValue({
+      images: ['data:image/png;base64,output'],
+      uploadToGallery: true,
+      privacyMode: false,
+      galleryUploadError: '上游不可用',
+    })
+    useStore.setState({
+      tasks: [],
+      prompt: 'prompt',
+      selectedModelId: testModel.id,
+      inputImages: [],
+      maskDraft: null,
+      params: { ...DEFAULT_PARAMS },
+      uploadToGallery: true,
+    })
+
+    await submitTask({ confirmed: true })
+    await flushPromises()
+
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      status: 'done',
+      uploadToGallery: true,
+    })
+    expect(useStore.getState().tasks[0].galleryUploadedAt).toBeUndefined()
+  })
+
+  it('confirms before uploading all outputs and references, then persists success', async () => {
+    const galleryTask = useStore.getState().tasks[0]
+    requestTaskGalleryUpload(galleryTask)
+
+    expect(apiMocks.uploadImagesToGallery).not.toHaveBeenCalled()
+    const dialog = vi.mocked(useStore.getState().setConfirmDialog).mock.calls[0][0]
+    expect(dialog?.message).toContain('2 张生成图片、2 张参考图')
+
+    dialog?.action()
+    await flushPromises(12)
+
+    expect(apiMocks.uploadImagesToGallery).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'gallery prompt',
+      modelId: testModel.id,
+      imageDataUrls: [
+        'data:image/png;base64,output-a',
+        'data:image/png;base64,output-b',
+      ],
+      referenceImageDataUrls: [
+        'data:image/png;base64,reference-a',
+        'data:image/png;base64,reference-b',
+      ],
+    }))
+    expect(useStore.getState().tasks[0].galleryUploadedAt).toEqual(expect.any(Number))
+    expect(dbMocks.putTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'gallery-task',
+      galleryUploadedAt: expect.any(Number),
+    }))
+    expect(useStore.getState().galleryUploadingTaskIds).toEqual([])
+  })
+
+  it('does not offer another upload after success', () => {
+    const uploadedTask = task({
+      id: 'uploaded-task',
+      outputImages: ['output-a'],
+      galleryUploadedAt: Date.now(),
+    })
+    requestTaskGalleryUpload(uploadedTask)
+    expect(useStore.getState().setConfirmDialog).not.toHaveBeenCalled()
   })
 })

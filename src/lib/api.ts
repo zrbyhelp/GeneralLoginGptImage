@@ -4,6 +4,7 @@ import {
   type CallApiResult,
   type ImageGenerationJobStatus,
 } from './imageApiShared'
+import type { ApiProvider, TaskParams } from '../types'
 
 export type { CallApiOptions, CallApiResult } from './imageApiShared'
 export { normalizeBaseUrl } from './devProxy'
@@ -18,6 +19,16 @@ export class ImageApiError extends Error {
     this.statusCode = statusCode
     this.data = data
   }
+}
+
+export interface GalleryUploadRequest {
+  prompt: string
+  params: TaskParams
+  modelId?: string
+  apiProvider?: ApiProvider
+  apiModel?: string
+  imageDataUrls: string[]
+  referenceImageDataUrls: string[]
 }
 
 const JOB_POLL_INTERVAL_MS = 1500
@@ -127,4 +138,18 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
   }
 
   return pollImageGenerationJob(payload.jobId, opts)
+}
+
+export async function uploadImagesToGallery(input: GalleryUploadRequest) {
+  const response = await fetch('/api/images/gallery-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify(input),
+  })
+  const payload = await readJsonResponse(response)
+  if (!payload || typeof payload !== 'object' || (payload as { ok?: unknown }).ok !== true) {
+    throw new Error('图集上传响应无效')
+  }
+  return payload as { ok: true }
 }

@@ -156,6 +156,21 @@ input[type="number"] {
   animation: fade-in 0.2s ease-out both;
 }
 
+@keyframes site-count-tick {
+  0% { opacity: 0.25; color: #10b981; transform: translateY(4px) scale(0.88); }
+  60% { opacity: 1; color: #059669; transform: translateY(-1px) scale(1.08); }
+  100% { opacity: 1; color: inherit; transform: translateY(0) scale(1); }
+}
+.animate-site-count-tick {
+  animation: site-count-tick 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-site-count-tick {
+    animation: none;
+  }
+}
+
 /* Lightbox 图片：缩放弹入 */
 @keyframes zoom-in {
   from { opacity: 0; transform: scale(0.9); }

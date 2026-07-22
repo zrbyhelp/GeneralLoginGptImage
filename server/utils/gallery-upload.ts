@@ -25,6 +25,7 @@ function getBlobExtension(blob: Blob) {
   const type = blob.type.toLowerCase()
   if (type === 'image/jpeg') return 'jpg'
   if (type === 'image/webp') return 'webp'
+  if (type === 'image/gif') return 'gif'
   return 'png'
 }
 

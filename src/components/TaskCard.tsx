@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, getCachedImage, ensureImageCached, updateTaskInStore, retryTask } from '../store'
+import { useStore, getCachedImage, ensureImageCached, updateTaskInStore, retryTask, requestTaskGalleryUpload } from '../store'
 import { formatImageRatio } from '../lib/size'
 import { ParamValue } from '../lib/paramDisplay'
 
@@ -32,6 +32,7 @@ export default function TaskCard({
   const [swipeStartedSelected, setSwipeStartedSelected] = useState(false)
   const [swipeActionActive, setSwipeActionActive] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
+  const galleryUploading = useStore((s) => s.galleryUploadingTaskIds.includes(task.id))
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
   const suppressClickUntilRef = useRef(0)
@@ -413,7 +414,7 @@ export default function TaskCard({
               </div>
             {/* 操作按钮 */}
             <div
-              className="flex gap-1 justify-end flex-shrink-0"
+              className="flex gap-0.5 justify-end flex-shrink-0 sm:gap-1"
               onClick={(e) => e.stopPropagation()}
             >
               {task.status === 'error' && !isFalReconnecting && (
@@ -425,6 +426,38 @@ export default function TaskCard({
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
+                </button>
+              )}
+              {task.status === 'done' && task.outputImages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => requestTaskGalleryUpload(task)}
+                  disabled={galleryUploading || Boolean(task.galleryUploadedAt)}
+                  className={`p-1.5 rounded-md transition disabled:cursor-not-allowed ${
+                    task.galleryUploadedAt
+                      ? 'bg-emerald-50 text-emerald-500 dark:bg-emerald-500/10 dark:text-emerald-400'
+                      : 'text-gray-400 hover:bg-blue-50 hover:text-blue-500 disabled:opacity-60 dark:hover:bg-blue-950/30'
+                  }`}
+                  title={task.galleryUploadedAt ? '已上传图集' : galleryUploading ? '正在上传图集' : '上传到图集'}
+                  aria-label={task.galleryUploadedAt ? '已上传图集' : galleryUploading ? '正在上传图集' : '上传到图集'}
+                >
+                  {galleryUploading ? (
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-80" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z" />
+                    </svg>
+                  ) : task.galleryUploadedAt ? (
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M20 16.5A4.5 4.5 0 0 0 17.5 8a6 6 0 0 0-11.3 2A4 4 0 0 0 6 18h5" />
+                      <path d="m14 16 2 2 4-4" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M20 16.5A4.5 4.5 0 0 0 17.5 8a6 6 0 0 0-11.3 2A4 4 0 0 0 6 18h12" />
+                      <path d="m12 12 3 3-3 3" />
+                      <path d="M15 15H8" />
+                    </svg>
+                  )}
                 </button>
               )}
               <button

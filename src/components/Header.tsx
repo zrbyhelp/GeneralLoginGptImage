@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useVersionCheck } from '../hooks/useVersionCheck'
 import HelpModal from './HelpModal'
+import SiteGenerationCounter from './SiteGenerationCounter'
+import { useSiteGenerationStats } from '../hooks/useSiteGenerationStats'
 
 export default function Header() {
   const setShowSettings = useStore((s) => s.setShowSettings)
   const showToast = useStore((s) => s.showToast)
   const auth = useStore((s) => s.auth)
+  const siteGeneratedImageCount = useStore((s) => s.siteGeneratedImageCount)
   const setShowAdminAudit = useStore((s) => s.setShowAdminAudit)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
@@ -23,6 +26,8 @@ export default function Header() {
   const userTitle = pointsBalance == null ? userLabel : `${userLabel} · ${pointsBalance} 积分`
   const avatarInitial = userLabel.trim().slice(0, 1).toUpperCase() || 'U'
   const avatarUrl = avatarFailed ? '' : auth.user?.avatarUrl
+
+  useSiteGenerationStats(auth.authenticated)
 
   useEffect(() => {
     if (!showUserMenu) return
@@ -82,8 +87,9 @@ export default function Header() {
 
   return (
     <header data-no-drag-select className="safe-area-top sticky top-0 z-40 border-b border-white/60 bg-white/65 backdrop-blur-xl shadow-sm shadow-slate-900/[0.03] dark:border-white/[0.08] dark:bg-gray-950/65 dark:shadow-black/20">
-      <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-end">
-        <div className="flex items-center gap-1">
+      <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between gap-2">
+        <SiteGenerationCounter value={siteGeneratedImageCount} />
+        <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
           {hasUpdate && latestRelease && (
             <a
               href={latestRelease.url}
@@ -189,7 +195,7 @@ export default function Header() {
             rel="noopener noreferrer"
             aria-label="GitHub"
             title="GitHub"
-            className="rounded-lg p-2 text-gray-600 transition-colors hover:bg-white/80 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.08] dark:hover:text-white"
+            className="hidden rounded-lg p-2 text-gray-600 transition-colors hover:bg-white/80 hover:text-gray-900 min-[400px]:inline-flex dark:text-gray-300 dark:hover:bg-white/[0.08] dark:hover:text-white"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path
@@ -207,7 +213,7 @@ export default function Header() {
               aria-label="用户菜单"
               aria-haspopup="menu"
               aria-expanded={showUserMenu}
-              className="flex h-9 max-w-52 items-center gap-2 rounded-full border border-white/70 bg-white/75 py-1 pl-1 pr-2 text-slate-700 shadow-sm shadow-slate-900/[0.04] transition-colors hover:bg-white dark:border-white/[0.1] dark:bg-white/[0.08] dark:text-slate-200 dark:hover:bg-white/[0.12]"
+              className="flex h-9 max-w-52 items-center gap-1 rounded-full border border-white/70 bg-white/75 py-1 pl-1 pr-1 text-slate-700 shadow-sm shadow-slate-900/[0.04] transition-colors hover:bg-white sm:gap-2 sm:pr-2 dark:border-white/[0.1] dark:bg-white/[0.08] dark:text-slate-200 dark:hover:bg-white/[0.12]"
             >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
                 {avatarUrl ? (
@@ -222,14 +228,14 @@ export default function Header() {
                   <span>{avatarInitial}</span>
                 )}
               </span>
-              <span data-i18n-skip className="max-w-20 truncate text-xs font-medium sm:max-w-28 sm:text-sm">{userLabel}</span>
+              <span data-i18n-skip className="hidden max-w-28 truncate text-sm font-medium sm:block">{userLabel}</span>
               {pointsBalance != null && (
-                <span data-i18n-skip className="shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                <span data-i18n-skip className="hidden shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-blue-600 sm:inline dark:bg-blue-500/10 dark:text-blue-300">
                   {pointsBalance}积分
                 </span>
               )}
               <svg
-                className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-400 ${showUserMenu ? 'rotate-180' : ''}`}
+                className={`hidden h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform sm:block dark:text-slate-400 ${showUserMenu ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 strokeWidth={2}
