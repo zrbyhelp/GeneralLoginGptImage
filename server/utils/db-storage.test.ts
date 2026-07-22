@@ -23,6 +23,7 @@ import {
 } from './audits'
 import { setDatabasePathForTests } from './db'
 import { countRecentGeneratedImages, recordGenerationUsage } from './generation-usage'
+import { getModelHealthById, recordModelGenerationHealth } from './model-health'
 
 type TestDatabase = {
   exec: (source: string) => void
@@ -132,6 +133,27 @@ describe('SQLite-backed server storage', () => {
     db.close()
 
     expect(usageColumns).toEqual(['id', 'user_id', 'image_count', 'privacy_mode', 'created_at'])
+  })
+
+  it('aggregates recent anonymous model health and clears expired events', async () => {
+    const now = Date.now()
+    const at = (offsetMs: number) => new Date(now + offsetMs).toISOString()
+    await recordModelGenerationHealth({ modelId: 'fast', success: true, generationMs: 20_000, finishedAt: at(-1_000) })
+    await recordModelGenerationHealth({ modelId: 'fast', success: true, generationMs: 40_000, finishedAt: at(-2_000) })
+    await recordModelGenerationHealth({ modelId: 'fast', success: true, generationMs: 60_000, finishedAt: at(-3_000) })
+    await recordModelGenerationHealth({ modelId: 'slow', success: true, generationMs: 200_000, finishedAt: at(-4_000) })
+    await recordModelGenerationHealth({ modelId: 'slow', success: false, generationMs: 100_000, finishedAt: at(-5_000) })
+    await recordModelGenerationHealth({ modelId: 'outside-window', success: true, generationMs: 1_000, finishedAt: at(-61 * 60_000) })
+    await recordModelGenerationHealth({ modelId: 'expired', success: true, generationMs: 1_000, finishedAt: at(-49 * 60 * 60_000) })
+    await recordModelGenerationHealth({ modelId: 'cleanup-trigger', success: true, generationMs: 1_000, finishedAt: at(-6_000) })
+
+    const health = await getModelHealthById(['fast', 'slow', 'outside-window', 'expired', 'missing'], now)
+
+    expect(health.fast).toMatchObject({ state: 'healthy', bars: 3, sampleCount: 3, successRate: 1, averageGenerationMs: 40_000 })
+    expect(health.slow).toMatchObject({ state: 'degraded', bars: 2, sampleCount: 2, successCount: 1, successRate: 0.5 })
+    expect(health['outside-window']).toMatchObject({ state: 'unknown', bars: 0 })
+    expect(health.expired).toMatchObject({ state: 'unknown', bars: 0 })
+    expect(health.missing).toMatchObject({ state: 'unknown', bars: 0 })
   })
 
   it('migrates legacy audit tables to include username and name', async () => {

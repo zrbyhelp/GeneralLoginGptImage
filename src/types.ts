@@ -96,6 +96,19 @@ export interface PublicGenerationModel {
   pricingPreviewRules: ModelPricingRules
 }
 
+export type ModelHealthState = 'unknown' | 'healthy' | 'degraded' | 'unavailable'
+
+export interface ModelHealth {
+  modelId: string
+  state: ModelHealthState
+  bars: 0 | 1 | 2 | 3
+  sampleCount: number
+  successCount: number
+  failureCount: number
+  successRate: number | null
+  averageGenerationMs: number | null
+}
+
 export interface ApiProfile {
   id: string
   name: string

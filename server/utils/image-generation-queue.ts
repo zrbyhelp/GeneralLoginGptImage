@@ -6,6 +6,7 @@ import { generateId } from './crypto'
 import type { AdminSettings, ServerApiConfig } from './admin-settings'
 import { callServerImageApi, type ServerImageApiResult } from './server-image-api'
 import { recordGenerationUsage } from './generation-usage'
+import { recordModelGenerationHealth } from './model-health'
 import { uploadThirdPartyGalleryContent } from './gallery-upload'
 import { ensureDailyPointsBalance, reserveGenerationPoints, settleGenerationPoints } from './points'
 
@@ -368,6 +369,11 @@ async function runUnit(job: ImageGenerationJob, unit: ImageGenerationUnit) {
     unit.error = getMessage(error)
   } finally {
     unit.finishedAt = Date.now()
+    void recordModelGenerationHealth({
+      modelId: job.apiConfig.id,
+      success: unit.status === 'done',
+      generationMs: Math.max(0, unit.finishedAt - (unit.startedAt ?? unit.finishedAt)),
+    }).catch(() => undefined)
     await finishJobIfComplete(job)
     void scheduleImageGenerationQueue()
   }

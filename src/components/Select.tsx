@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 
 interface Option {
   label: string
   value: string | number
+  endAdornment?: ReactNode
+  description?: string
 }
 
 interface SelectProps {
@@ -39,7 +41,7 @@ export default function Select({ value, onChange, options, disabled, className }
       const rect = triggerRef.current.getBoundingClientRect()
       const spaceAbove = rect.top
       const spaceBelow = window.innerHeight - rect.bottom
-      const estimatedMenuHeight = Math.min(options.length * 36 + 8, 240)
+      const estimatedMenuHeight = Math.min(options.length * 52 + 8, 240)
       setOpenUp(spaceAbove > spaceBelow)
     }
 
@@ -56,14 +58,17 @@ export default function Select({ value, onChange, options, disabled, className }
         }`}
       >
         <span className="truncate">{selectedOption?.label ?? value}</span>
-        <svg
-          className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {selectedOption?.endAdornment}
+          <svg
+            className={`w-3.5 h-3.5 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </span>
       </div>
 
       {isOpen && (
@@ -79,13 +84,21 @@ export default function Select({ value, onChange, options, disabled, className }
                 onChange(option.value)
                 setIsOpen(false)
               }}
-              className={`px-3 py-2 text-xs cursor-pointer transition-colors ${
+              className={`flex items-center gap-2 px-3 py-2 text-xs cursor-pointer transition-colors ${
                 option.value === value
                   ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
               }`}
             >
-              {option.label}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{option.label}</span>
+                {option.description && (
+                  <span className="mt-0.5 block truncate text-[10px] font-normal text-gray-400 dark:text-gray-500">
+                    {option.description}
+                  </span>
+                )}
+              </span>
+              {option.endAdornment}
             </div>
           ))}
         </div>

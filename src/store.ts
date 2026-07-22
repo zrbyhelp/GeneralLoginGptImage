@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type {
   AppSettings,
   ApiProvider,
+  ModelHealth,
   PublicGenerationModel,
   TaskParams,
   InputImage,
@@ -103,9 +104,11 @@ interface AppState {
       galleryUploadDefault: boolean
       models: PublicGenerationModel[]
       defaultModelId: string
+      modelHealthById?: Record<string, ModelHealth>
     }
   }
   setAuth: (auth: Partial<AppState['auth']>) => void
+  setModelHealth: (modelHealthById: Record<string, ModelHealth>) => void
 
   // Display preferences
   theme: AppTheme
@@ -216,6 +219,7 @@ export const useStore = create<AppState>()(
           galleryUploadDefault: false,
           models: [],
           defaultModelId: '',
+          modelHealthById: {},
         },
       },
       setAuth: (auth) => set((state) => {
@@ -226,6 +230,15 @@ export const useStore = create<AppState>()(
           : nextAuth.generationDefaults.defaultModelId || models[0]?.id || ''
         return { auth: nextAuth, selectedModelId }
       }),
+      setModelHealth: (modelHealthById) => set((state) => ({
+        auth: {
+          ...state.auth,
+          generationDefaults: {
+            ...state.auth.generationDefaults,
+            modelHealthById,
+          },
+        },
+      })),
 
       // Display preferences
       setTheme: (theme) => set({ theme }),
@@ -377,6 +390,34 @@ export const useStore = create<AppState>()(
     },
   ),
 )
+
+function isModelHealth(value: unknown): value is ModelHealth {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return typeof record.modelId === 'string' &&
+    (record.state === 'unknown' || record.state === 'healthy' || record.state === 'degraded' || record.state === 'unavailable') &&
+    (record.bars === 0 || record.bars === 1 || record.bars === 2 || record.bars === 3) &&
+    typeof record.sampleCount === 'number' &&
+    typeof record.successCount === 'number' &&
+    typeof record.failureCount === 'number'
+}
+
+export async function refreshModelHealth() {
+  if (!useStore.getState().auth.authenticated) return
+  try {
+    const response = await fetch('/api/images/model-health', { cache: 'no-store' })
+    if (!response.ok) return
+    const payload = await response.json() as { modelHealthById?: unknown }
+    if (!payload.modelHealthById || typeof payload.modelHealthById !== 'object') return
+
+    const modelHealthById = Object.fromEntries(
+      Object.entries(payload.modelHealthById).filter(([, value]) => isModelHealth(value)),
+    ) as Record<string, ModelHealth>
+    useStore.getState().setModelHealth(modelHealthById)
+  } catch {
+    // Keep the latest known health state when a refresh cannot be completed.
+  }
+}
 
 // ===== Actions =====
 
@@ -1024,6 +1065,7 @@ async function executeTask(taskId: string) {
       useStore.getState().setDetailTaskId(taskId)
     }
   } finally {
+    void refreshModelHealth()
     // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
     for (const imgId of task.inputImageIds) {
       imageCache.delete(imgId)
@@ -1052,6 +1094,8 @@ async function resumeQueuedImageJob(taskId: string) {
       finishedAt: Date.now(),
       elapsed: Date.now() - latest.createdAt,
     })
+  } finally {
+    void refreshModelHealth()
   }
 }
 

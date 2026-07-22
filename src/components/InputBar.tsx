@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useStore, submitTask, addImageFromFile, updateTaskInStore, removeMultipleTasks } from '../store'
+import { useStore, submitTask, addImageFromFile, updateTaskInStore, removeMultipleTasks, refreshModelHealth } from '../store'
 import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { normalizeImageSize } from '../lib/size'
@@ -9,6 +9,8 @@ import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import Select from './Select'
 import SizePickerModal from './SizePickerModal'
 import ViewportTooltip from './ViewportTooltip'
+import ModelHealthSignal from './ModelHealthSignal'
+import { getModelHealthDescription } from '../lib/modelHealth'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -158,10 +160,12 @@ export default function InputBar() {
   const isMobile = useIsMobile()
 
   const models = auth.generationDefaults.models
+  const modelHealthById = auth.generationDefaults.modelHealthById ?? {}
   const selectedModel = models.find((model) => model.id === selectedModelId) ??
     models.find((model) => model.id === auth.generationDefaults.defaultModelId) ??
     models[0] ??
     null
+  const modelIdsKey = models.map((model) => model.id).join('|')
   const activeProvider = selectedModel?.provider ?? 'openai'
   const isFalProvider = activeProvider === 'fal'
   const isGeminiProvider = activeProvider === 'google-gemini'
@@ -238,6 +242,13 @@ export default function InputBar() {
       setParams(patch)
     }
   }, [params, selectedModel, setParams])
+
+  useEffect(() => {
+    if (!auth.authenticated || !models.length) return
+    void refreshModelHealth()
+    const timer = window.setInterval(() => void refreshModelHealth(), 60_000)
+    return () => window.clearInterval(timer)
+  }, [auth.authenticated, modelIdsKey, models.length])
 
   useEffect(() => () => {
     if (compressionHintTimerRef.current != null) {
@@ -1396,6 +1407,8 @@ export default function InputBar() {
                   options={models.map((model) => ({
                     label: `${model.name}${model.codexCompatible ? ' · Codex' : ''}`,
                     value: model.id,
+                    endAdornment: <ModelHealthSignal health={modelHealthById[model.id]} />,
+                    description: getModelHealthDescription(modelHealthById[model.id]),
                   }))}
                   disabled={!models.length}
                   className="rounded-xl border border-gray-200/60 bg-white/50 px-3 py-1.5 text-xs shadow-sm transition-all duration-200 dark:border-white/[0.08] dark:bg-white/[0.03]"

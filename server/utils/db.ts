@@ -137,6 +137,17 @@ function initSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS generation_usage_user_privacy_created_at_idx
       ON generation_usage (user_id, privacy_mode, created_at);
 
+    CREATE TABLE IF NOT EXISTS model_generation_health (
+      id TEXT PRIMARY KEY,
+      model_id TEXT NOT NULL,
+      success INTEGER NOT NULL,
+      generation_ms INTEGER NOT NULL,
+      finished_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS model_generation_health_model_finished_at_idx
+      ON model_generation_health (model_id, finished_at);
+
     CREATE TABLE IF NOT EXISTS generation_audits (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

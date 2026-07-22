@@ -16,6 +16,9 @@ const apiMocks = vi.hoisted(() => ({
 const usageMocks = vi.hoisted(() => ({
   recordGenerationUsage: vi.fn(),
 }))
+const modelHealthMocks = vi.hoisted(() => ({
+  recordModelGenerationHealth: vi.fn(),
+}))
 const galleryMocks = vi.hoisted(() => ({
   uploadThirdPartyGalleryContent: vi.fn(),
 }))
@@ -27,6 +30,7 @@ const pointMocks = vi.hoisted(() => ({
 
 vi.mock('./server-image-api', () => apiMocks)
 vi.mock('./generation-usage', () => usageMocks)
+vi.mock('./model-health', () => modelHealthMocks)
 vi.mock('./gallery-upload', () => galleryMocks)
 vi.mock('./points', () => pointMocks)
 
@@ -154,6 +158,7 @@ beforeEach(() => {
   }))
   vi.clearAllMocks()
   usageMocks.recordGenerationUsage.mockResolvedValue(null)
+  modelHealthMocks.recordModelGenerationHealth.mockResolvedValue(null)
   galleryMocks.uploadThirdPartyGalleryContent.mockResolvedValue(undefined)
   pointMocks.reserveGenerationPoints.mockResolvedValue({
     balance: 99,
@@ -368,6 +373,15 @@ describe('image generation queue', () => {
         totalPoints: 144000,
       }),
     })
+    expect(modelHealthMocks.recordModelGenerationHealth).toHaveBeenCalledTimes(2)
+    expect(modelHealthMocks.recordModelGenerationHealth).toHaveBeenCalledWith(expect.objectContaining({
+      modelId: apiConfig.id,
+      success: true,
+    }))
+    expect(modelHealthMocks.recordModelGenerationHealth).toHaveBeenCalledWith(expect.objectContaining({
+      modelId: apiConfig.id,
+      success: false,
+    }))
   })
 
   it('settles Gemini search grounding by actual counts', async () => {

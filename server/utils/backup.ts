@@ -159,6 +159,7 @@ const CORE_TABLES = [
   'point_ledger',
   'redeem_codes',
   'generation_usage',
+  'model_generation_health',
   'generation_audits',
   'generation_audit_images',
 ]
