@@ -22,7 +22,7 @@ export function deriveModelHealth(metrics: ModelHealthMetrics): ModelHealth {
   let bars: ModelHealth['bars'] = 0
 
   if (sampleCount > 0 && successRate != null && averageGenerationMs != null) {
-    if (sampleCount >= 3 && successRate >= 0.8 && averageGenerationMs <= 60_000) {
+    if (sampleCount >= 3 && successRate >= 0.8 && averageGenerationMs <= 90_000) {
       state = 'healthy'
       bars = 3
     } else if (successRate >= 0.5 && averageGenerationMs <= 180_000) {

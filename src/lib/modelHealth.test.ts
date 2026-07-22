@@ -22,7 +22,7 @@ describe('model health rating', () => {
       modelId: 'healthy',
       sampleCount: 5,
       successCount: 4,
-      averageGenerationMs: 60_000,
+      averageGenerationMs: 90_000,
     })).toMatchObject({ state: 'healthy', bars: 3 })
   })
 
