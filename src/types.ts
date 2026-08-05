@@ -205,7 +205,7 @@ export interface TaskRecord {
   falRecoverable?: boolean
   /** 服务端生成队列 job id，用于刷新后恢复排队/生成状态 */
   queueJobId?: string
-  /** 服务端队列位置，1 表示下一张等待启动 */
+  /** 服务端公平调度下的预计队列位置，1 表示下一张等待启动 */
   queuePosition?: number | null
   /** 服务端队列已结束的图片单元数（成功或失败） */
   queueCompletedImages?: number

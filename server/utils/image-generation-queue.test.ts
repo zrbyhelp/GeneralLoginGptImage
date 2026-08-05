@@ -116,6 +116,12 @@ const otherUser: AppUser = {
   account: 'user-b',
 }
 
+const thirdUser: AppUser = {
+  ...user,
+  id: 'user-c',
+  account: 'user-c',
+}
+
 const adminUser: AppUser = {
   ...user,
   id: 'admin',
@@ -222,7 +228,7 @@ describe('image generation queue', () => {
     })
   })
 
-  it('queues normal-user images beyond the service concurrency limit and starts them FIFO', async () => {
+  it('queues normal-user images beyond the service concurrency limit', async () => {
     const first = createDeferred({ images: ['data:image/png;base64,a'] })
     const second = createDeferred({ images: ['data:image/png;base64,b'] })
     apiMocks.callServerImageApi
@@ -275,6 +281,186 @@ describe('image generation queue', () => {
       status: 'running',
       runningImages: 1,
     })
+  })
+
+  it('round-robins queued images across normal users without starving later users', async () => {
+    const deferreds = Array.from({ length: 7 }, () => createDeferred({ images: ['data:image/png;base64,result'] }))
+    const startedPrompts: string[] = []
+    apiMocks.callServerImageApi.mockImplementation((input) => {
+      startedPrompts.push(input.prompt)
+      return deferreds[startedPrompts.length - 1].promise
+    })
+
+    await createImageGenerationJob({
+      user,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-a',
+      params: { ...params, n: 3 },
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(1, 3),
+    })
+    await createImageGenerationJob({
+      user: otherUser,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-b',
+      params: { ...params, n: 2 },
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(1, 2),
+    })
+    await createImageGenerationJob({
+      user: thirdUser,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-c',
+      params: { ...params, n: 2 },
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(1, 2),
+    })
+
+    for (const deferred of deferreds) {
+      deferred.resolve({ images: ['data:image/png;base64,result'] })
+      await flushPromises()
+    }
+
+    expect(startedPrompts).toEqual([
+      'user-a',
+      'user-b',
+      'user-c',
+      'user-a',
+      'user-b',
+      'user-c',
+      'user-a',
+    ])
+  })
+
+  it('keeps task and image order FIFO within each user', async () => {
+    const deferreds = Array.from({ length: 4 }, () => createDeferred({ images: ['data:image/png;base64,result'] }))
+    const startedPrompts: string[] = []
+    apiMocks.callServerImageApi.mockImplementation((input) => {
+      startedPrompts.push(input.prompt)
+      return deferreds[startedPrompts.length - 1].promise
+    })
+
+    await createImageGenerationJob({
+      user,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-a-first',
+      params: { ...params, n: 2 },
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(1, 2),
+    })
+    await createImageGenerationJob({
+      user: otherUser,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-b',
+      params,
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(),
+    })
+    await createImageGenerationJob({
+      user,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-a-second',
+      params,
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(),
+    })
+
+    for (const deferred of deferreds) {
+      deferred.resolve({ images: ['data:image/png;base64,result'] })
+      await flushPromises()
+    }
+
+    expect(startedPrompts).toEqual([
+      'user-a-first',
+      'user-b',
+      'user-a-first',
+      'user-a-second',
+    ])
+  })
+
+  it('reports queue positions using the predicted fair dispatch order', async () => {
+    const deferreds = Array.from({ length: 5 }, () => createDeferred({ images: ['data:image/png;base64,result'] }))
+    apiMocks.callServerImageApi.mockImplementation(() => deferreds[apiMocks.callServerImageApi.mock.calls.length - 1].promise)
+
+    const firstStatus = await createImageGenerationJob({
+      user,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-a',
+      params: { ...params, n: 3 },
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(1, 3),
+    })
+    const secondStatus = await createImageGenerationJob({
+      user: otherUser,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-b',
+      params,
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(),
+    })
+    const thirdStatus = await createImageGenerationJob({
+      user: thirdUser,
+      isAdmin: false,
+      settings: settings({ serviceConcurrentImageLimit: 1, userConcurrentImageLimit: 10 }),
+      apiConfig,
+      prompt: 'user-c',
+      params,
+      inputImageDataUrls: [],
+      uploadToGallery: false,
+      dailyPointsTarget: 100,
+      pricing: pricing(),
+    })
+
+    expect(serializeImageGenerationJob(getImageGenerationJob(secondStatus.jobId)!)).toMatchObject({ queuePosition: 1 })
+    expect(serializeImageGenerationJob(getImageGenerationJob(thirdStatus.jobId)!)).toMatchObject({ queuePosition: 2 })
+    expect(serializeImageGenerationJob(getImageGenerationJob(firstStatus.jobId)!)).toMatchObject({ queuePosition: 3 })
+
+    deferreds[0].resolve({ images: ['data:image/png;base64,result'] })
+    await flushPromises()
+
+    expect(serializeImageGenerationJob(getImageGenerationJob(secondStatus.jobId)!)).toMatchObject({
+      status: 'running',
+      queuePosition: null,
+    })
+    expect(serializeImageGenerationJob(getImageGenerationJob(thirdStatus.jobId)!)).toMatchObject({ queuePosition: 1 })
+    expect(serializeImageGenerationJob(getImageGenerationJob(firstStatus.jobId)!)).toMatchObject({ queuePosition: 2 })
+
+    for (const deferred of deferreds.slice(1)) {
+      deferred.resolve({ images: ['data:image/png;base64,result'] })
+      await flushPromises()
+    }
   })
 
   it('does not apply service concurrency limits to admins', async () => {

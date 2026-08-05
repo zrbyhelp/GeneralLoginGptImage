@@ -95,6 +95,7 @@ const jobs = new Map<string, ImageGenerationJob>()
 let scheduling = false
 let scheduleAgain = false
 let serviceConcurrentImageLimit = 3
+let lastScheduledNormalUserId: string | null = null
 
 function getMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
@@ -142,13 +143,84 @@ function countUserUnfinishedUnits(userId: string) {
   return count
 }
 
-function getFirstQueuedNormalUnit() {
+function getNormalUserOrder() {
+  const seen = new Set<string>()
+  const userIds: string[] = []
   for (const job of jobs.values()) {
-    if (job.isAdmin || job.status === 'done' || job.status === 'error') continue
+    if (job.isAdmin || seen.has(job.user.id)) continue
+    seen.add(job.user.id)
+    userIds.push(job.user.id)
+  }
+  return userIds
+}
+
+function getNextQueuedUserId(
+  userIds: string[],
+  afterUserId: string | null,
+  hasQueuedUnit: (userId: string) => boolean,
+) {
+  if (!userIds.length) return null
+  const afterIndex = afterUserId ? userIds.indexOf(afterUserId) : -1
+  const startIndex = afterIndex >= 0 ? (afterIndex + 1) % userIds.length : 0
+
+  for (let offset = 0; offset < userIds.length; offset += 1) {
+    const userId = userIds[(startIndex + offset) % userIds.length]
+    if (hasQueuedUnit(userId)) return userId
+  }
+  return null
+}
+
+function getNextQueuedNormalUnit(afterUserId: string | null) {
+  const userIds = getNormalUserOrder()
+  const nextUserId = getNextQueuedUserId(userIds, afterUserId, (userId) => {
+    for (const job of jobs.values()) {
+      if (job.isAdmin || job.user.id !== userId) continue
+      if (job.units.some((unit) => unit.status === 'queued')) return true
+    }
+    return false
+  })
+  if (!nextUserId) return null
+
+  for (const job of jobs.values()) {
+    if (job.isAdmin || job.user.id !== nextUserId) continue
     const unit = job.units.find((item) => item.status === 'queued')
     if (unit) return { job, unit }
   }
   return null
+}
+
+function getQueuedNormalUnitsInDispatchOrder() {
+  const userIds = getNormalUserOrder()
+  const queuedByUser = new Map<string, Array<{ job: ImageGenerationJob, unit: ImageGenerationUnit }>>()
+  let remaining = 0
+
+  for (const job of jobs.values()) {
+    if (job.isAdmin) continue
+    const queue = queuedByUser.get(job.user.id) ?? []
+    for (const unit of job.units) {
+      if (unit.status !== 'queued') continue
+      queue.push({ job, unit })
+      remaining += 1
+    }
+    if (queue.length) queuedByUser.set(job.user.id, queue)
+  }
+
+  const ordered: Array<{ job: ImageGenerationJob, unit: ImageGenerationUnit }> = []
+  let afterUserId = lastScheduledNormalUserId
+  while (remaining > 0) {
+    const nextUserId = getNextQueuedUserId(
+      userIds,
+      afterUserId,
+      (userId) => Boolean(queuedByUser.get(userId)?.length),
+    )
+    if (!nextUserId) break
+    const next = queuedByUser.get(nextUserId)?.shift()
+    if (!next) break
+    ordered.push(next)
+    remaining -= 1
+    afterUserId = nextUserId
+  }
+  return ordered
 }
 
 function getQueuePosition(job: ImageGenerationJob) {
@@ -156,16 +228,10 @@ function getQueuePosition(job: ImageGenerationJob) {
   const ownQueuedUnit = job.units.find((unit) => unit.status === 'queued')
   if (!ownQueuedUnit) return null
 
-  let position = 1
-  for (const candidateJob of jobs.values()) {
-    if (candidateJob.isAdmin || candidateJob.status === 'done' || candidateJob.status === 'error') continue
-    for (const unit of candidateJob.units) {
-      if (unit.status !== 'queued') continue
-      if (candidateJob.id === job.id && unit.index === ownQueuedUnit.index) return position
-      position += 1
-    }
-  }
-  return null
+  const position = getQueuedNormalUnitsInDispatchOrder().findIndex(
+    (candidate) => candidate.job.id === job.id && candidate.unit.index === ownQueuedUnit.index,
+  )
+  return position >= 0 ? position + 1 : null
 }
 
 function refreshJobStatus(job: ImageGenerationJob) {
@@ -402,8 +468,9 @@ async function scheduleImageGenerationQueue() {
     }
 
     while (countNormalActiveUnits() < serviceConcurrentImageLimit) {
-      const next = getFirstQueuedNormalUnit()
+      const next = getNextQueuedNormalUnit(lastScheduledNormalUserId)
       if (!next) break
+      lastScheduledNormalUserId = next.job.user.id
       startUnit(next.job, next.unit)
     }
 
@@ -539,4 +606,5 @@ export function resetImageGenerationQueueForTests() {
   scheduling = false
   scheduleAgain = false
   serviceConcurrentImageLimit = 3
+  lastScheduledNormalUserId = null
 }
