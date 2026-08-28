@@ -47,6 +47,8 @@ export default defineNuxtConfig({
     apiCodexCli: 'false',
     public: {
       appUrl: 'http://localhost:3000',
+      chatwootBaseUrl: 'https://support.zrbyhelp.com',
+      chatwootWebsiteToken: 'jfVfyvJmDgAgzscCxtyeSABn',
     },
   },
   app: {

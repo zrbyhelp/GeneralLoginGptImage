@@ -12,6 +12,7 @@
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
+  --chatwoot-bottom-offset: calc(7rem + var(--safe-area-bottom));
   scrollbar-gutter: stable;
 }
 
@@ -244,5 +245,30 @@ input[type="number"] {
   textarea,
   select {
     font-size: 16px;
+  }
+}
+
+/* Keep the support launcher above the fixed generation controls. */
+.woot-widget-bubble,
+.woot-widget-bubble.woot-widget--expanded {
+  bottom: var(--chatwoot-bottom-offset) !important;
+}
+
+.woot-widget-bubble.woot-elements--right {
+  right: max(1rem, var(--safe-area-right)) !important;
+}
+
+.woot-widget-holder.has-unread-view {
+  bottom: calc(var(--chatwoot-bottom-offset) + 4.75rem) !important;
+}
+
+@media (min-width: 668px) {
+  .woot-widget-holder:not(.has-unread-view) {
+    bottom: calc(var(--chatwoot-bottom-offset) + 5rem) !important;
+    height: min(688px, calc(100dvh - var(--chatwoot-bottom-offset) - 6rem)) !important;
+  }
+
+  .woot-widget-holder.woot-elements--right {
+    right: max(1rem, var(--safe-area-right)) !important;
   }
 }
