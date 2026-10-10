@@ -17,6 +17,7 @@ import PortalBackground from './components/PortalBackground'
 import AdminAuditModal from './components/AdminAuditModal'
 import LoginNoticeModal from './components/LoginNoticeModal'
 import AnnouncementBanner, { type ServiceAnnouncement } from './components/AnnouncementBanner'
+import WelcomeInviteBanner from './components/WelcomeInviteBanner'
 
 export default function App() {
   const auth = useStore((s) => s.auth)
@@ -187,6 +188,7 @@ export default function App() {
       <PortalBackground />
       <div className="relative z-10 min-h-screen">
         <Header />
+        <WelcomeInviteBanner />
         <AnnouncementBanner
           announcements={announcements.filter((announcement) => !dismissedAnnouncementIds.includes(announcement.id))}
           onDismiss={dismissAnnouncement}

@@ -12,6 +12,10 @@ const exactEn: Record<string, string> = {
   '提示': 'Notice',
   '公告': 'Announcement',
   '关闭公告': 'Dismiss announcement',
+  '新产品内测邀请': 'New product beta invite',
+  '点击查看': 'View invite',
+  '本站每日赠送已暂时关闭。欢迎参与全新产品内测：注册赠送 10000 积分，建议下载客户端体验。':
+    'Daily free points on this site are temporarily paused. Join the new product beta: 10,000 points on signup, and the client is recommended.',
   '我知道了': 'Got it',
   '目前每日会自动补满至 100 积分，平台已完全开放使用，无需申请。':
     'The account is automatically refilled to 100 points every day, and the platform is fully open to use with no application required.',
